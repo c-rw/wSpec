@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wspec.local/schemas/analysis-findings.schema.json",
+  "title": "wSpec Analysis Findings",
+  "type": "object",
+  "required": ["analysis"],
+  "additionalProperties": false,
+  "properties": {
+    "analysis": {
+      "type": "object",
+      "required": [
+        "status",
+        "total",
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "findings",
+        "coverage_gaps",
+        "principles_issues"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pass", "warnings", "issues"]
+        },
+        "total": { "type": "integer", "minimum": 0 },
+        "critical": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "category",
+              "severity",
+              "location",
+              "summary",
+              "affects_phases",
+              "resolved"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^A[0-9]+$"
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "Coverage Gap",
+                  "Ambiguity",
+                  "Duplication",
+                  "Inconsistency",
+                  "Underspecification",
+                  "Principles",
+                  "SOLID Violation",
+                  "Security",
+                  "Architecture Risk",
+                  "Scope Creep",
+                  "Adversarial",
+                  "Boundary"
+                ]
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+              },
+              "location": { "type": "string", "minLength": 1 },
+              "summary": { "type": "string", "minLength": 1 },
+              "affects_phases": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^Phase [0-9]+$" }
+              },
+              "resolved": { "type": "boolean" },
+              "defer_reason": { "type": "string" }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "resolved": { "const": true } },
+                  "required": ["resolved"]
+                },
+                "then": {
+                  "properties": {
+                    "defer_reason": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "coverage_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["requirement", "has_task", "task_ids"],
+            "additionalProperties": false,
+            "properties": {
+              "requirement": {
+                "type": "string",
+                "pattern": "^(FR|SC)-[0-9]{3}$"
+              },
+              "has_task": { "type": "boolean" },
+              "task_ids": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^T[0-9]{3}$" }
+              }
+            }
+          }
+        },
+        "principles_issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["principle", "violation", "severity"],
+            "additionalProperties": false,
+            "properties": {
+              "principle": { "type": "string", "minLength": 1 },
+              "violation": { "type": "string", "minLength": 1 },
+              "severity": {
+                "type": "string",
+                "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

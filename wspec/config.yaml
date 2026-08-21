@@ -1,0 +1,67 @@
+# wSpec Configuration
+#
+# The context:/rules: override scaffold below is derived from openspec/config.yaml in
+# Fission-AI OpenSpec (https://github.com/Fission-AI/OpenSpec), MIT licensed.
+# See THIRD-PARTY-NOTICES.md. Modified for wSpec.
+schema_version: "1.0"
+
+# Branch strategy: "sequential" → feat/001-name, feat/002-name, ...
+branch_numbering: sequential
+
+# What /wspec-finalize should do after archiving the change folder.
+# Values:
+#   none  — do nothing
+#   ask   — prompt: PR / merge / skip (default)
+#   pr    — open a pull/merge request via the gh or glab CLI (see `forge` below; requires
+#           the matching CLI installed and authed)
+#   merge — fast-forward the change branch into the default branch locally
+post_archive_action: ask
+
+# Which forge's CLI to use for post_archive_action: pr, and for /wspec-capture issue
+# operations (wspec.captureIssue, wspec.listIssues, wspec.getIssue, wspec.commentIssue,
+# wspec.updateIssue, wspec.closeIssue).
+# Values:
+#   auto   — detect from the `origin` remote: github.com → gh, anything else → glab (default)
+#   github — always use gh
+#   gitlab — always use glab
+forge: auto
+
+# Label applied to issues created by /wspec-capture, and used as the default filter for
+# wspec.listIssues (e.g. when /wspec-propose is run with no issue reference and needs to
+# offer the open captured backlog to pick from).
+capture_label: wspec
+
+# What /wspec-implement should do after a phase with real code changes.
+# Values:
+#   ask  — prompt whether to commit phase progress (default)
+#   auto — commit phase progress automatically after validation passes
+implement_phase_commits: ask
+
+# How many days a recorded gate override (wspec.recordOverride) stays valid before it
+# auto-expires. Overrides also auto-revoke when their underlying finding changes or is
+# resolved. Default 14.
+override_ttl_days: 14
+
+# Strategy used by /wspec-finalize when post_archive_action is "merge".
+# Values:
+#   ask    — prompt per change (default)
+#   squash — git merge --squash (clean linear history, one commit per feature)
+#   merge  — git merge --no-ff (preserves full commit history with merge commit)
+#   ff     — git merge --ff-only (fast-forward only, fails if not possible)
+merge_strategy: ask
+
+# Project context for AI artifact generation.
+# Add your tech stack, conventions, domain knowledge, etc.
+# context: |
+#   Tech stack: TypeScript, Node.js
+#   Domain: e-commerce platform
+#   Conventions: conventional commits, trunk-based development
+
+# Per-artifact rule overrides (optional).
+# rules:
+#   proposal:
+#     - Keep proposals under 300 words
+#   tasks:
+#     - Break tasks into chunks of max 2 hours
+#   spec:
+#     - All FRs must reference a user story

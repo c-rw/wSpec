@@ -1,0 +1,17 @@
+# wSpec generated / runtime files
+wspec/state.json
+wspec/state.json.lock
+wspec/.state.*.tmp
+
+# Per-transcript cursor for effort/cost tracking — ephemeral and machine-local; the durable
+# records are wspec/changes/<id>/usage.json and wspec/usage-log.jsonl, both committed.
+wspec/usage-cursor.json
+
+# memsearch tool cache
+.memsearch/
+
+# remember plugin history
+.remember/
+
+# internal workflow/cost audit - not release material
+WSPEC-WORKFLOW-ANALYSIS.md

@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -eu
+
+WSPEC_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+
+if ! command -v node >/dev/null 2>&1; then
+	echo "[wspec] node not found on PATH — pre-commit gate skipped (run install to restore)." >&2
+	exit 0
+fi
+
+exec node "$WSPEC_DIR/mcp/dist/cli.js" hook:pre-commit "$@"

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Reference snapshot of wSpec-owned Claude Code settings. The installer merges these keys into .claude/settings.json automatically (init and upgrade), leaving your custom keys intact. See wspec/scripts/merge-settings.cjs for the merge logic.",
+  "mcpServers": {
+    "wspec": {
+      "command": "node",
+      "args": ["wspec/mcp/dist/cli.js", "serve"],
+      "type": "stdio"
+    }
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node wspec/mcp/dist/cli.js state:banner"
+  },
+  "_hooks_comment": "MCP tool matchers use mcp__<serverName>__<toolName>. This server's tool names already embed a 'wspec.' prefix (see wspec/mcp/src/lib/tools.ts), so the wire name is literally 'wspec.markTask' etc. -> matcher 'mcp__wspec__wspec.markTask'.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node wspec/mcp/dist/cli.js state:banner"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node wspec/mcp/dist/cli.js state:banner"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node wspec/mcp/dist/cli.js hook:guard-edit"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__wspec__wspec.markTask|mcp__wspec__wspec.setStatus|mcp__wspec__wspec.syncSpec",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node wspec/mcp/dist/cli.js state:sync"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node wspec/mcp/dist/cli.js hook:nudge-validate"
+          },
+          {
+            "type": "command",
+            "command": "node wspec/mcp/dist/cli.js hook:usage-track"
+          }
+        ]
+      }
+    ]
+  },
+  "_permissions_comment": "Read-only wspec MCP tools and read-only git inspection are auto-allowed to cut friction. Mutating tools (setStatus, markTask, archive, postArchive, syncSpec apply:true, appendFindings, recordOverride) and mutating git (commit/push/merge) are deliberately left ungated here so Claude Code's normal per-call prompt still applies.",
+  "permissions": {
+    "allow": [
+      "Bash(node wspec/mcp/dist/cli.js:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "mcp__wspec__wspec.status",
+      "mcp__wspec__wspec.loadChange",
+      "mcp__wspec__wspec.repoScan",
+      "mcp__wspec__wspec.loadState",
+      "mcp__wspec__wspec.verifyState",
+      "mcp__wspec__wspec.gateCheck",
+      "mcp__wspec__wspec.validateAnalysis",
+      "mcp__wspec__wspec.validateAll",
+      "mcp__wspec__wspec.doctor",
+      "mcp__wspec__wspec.listIssues",
+      "mcp__wspec__wspec.getIssue",
+      "mcp__wspec__wspec.usageReport"
+    ]
+  }
+}
