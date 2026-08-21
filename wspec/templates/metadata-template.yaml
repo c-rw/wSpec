@@ -1,0 +1,16 @@
+id: "{{NNN}}"
+name: "{{kebab-name}}"
+title: "{{Human Readable Title}}"
+status: "drafting"  # drafting | ready | implementing | done
+
+branch: "feat/{{NNN}}-{{kebab-name}}"
+capability: ""  # optional: capability domain for spec sync, e.g. "auth" or "payments"
+                # used by /wspec-finalize to sync delta specs into wspec/specs/<capability>/
+
+issue: ""  # optional: source tracker issue number, set by /wspec-propose when proposing
+           # from a /wspec-capture issue. /wspec-finalize closes this issue on archive.
+
+estimated_effort: ""  # optional: rough total effort, e.g. "~3 days", "1 week", "4 hours"
+
+created: "{{ISO_DATE}}"
+updated: "{{ISO_DATE}}"
