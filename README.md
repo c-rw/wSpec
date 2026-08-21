@@ -35,12 +35,15 @@ To upgrade an existing install:
 Run these as Claude Code slash commands:
 
 ```text
-/wspec-principles          - scan the repo and write enforceable MUST/MUST NOT guardrails
-/wspec-propose <idea>      - research, clarify, branch, and generate the full change packet
-/wspec-research [id]       - refresh research for an existing change mid-lifecycle
-/wspec-implement [id]      - execute tasks phase by phase with validation gates
-/wspec-finalize [id]       - sync specs, archive, and close out
+/wspec-capture <brain-dump> - turn free-form ideas into tracked GitHub/GitLab issues
+/wspec-principles           - scan the repo and write enforceable MUST/MUST NOT guardrails
+/wspec-propose <idea|#issue> - research, clarify, branch, and generate the full change packet
+/wspec-research [id]        - refresh research for an existing change mid-lifecycle
+/wspec-implement [id]       - execute tasks phase by phase with validation gates
+/wspec-finalize [id]        - sync specs, archive, and close out
 ```
+
+`/wspec-capture` is Claude Code-only - it has no terminal script, unlike the other five.
 
 ## Terminal CLI
 
