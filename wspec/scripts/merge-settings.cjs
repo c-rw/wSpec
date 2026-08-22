@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 'use strict';
 // Merges wSpec-owned keys into .claude/settings.json, leaving everything else intact.
+// Also registers the MCP server in the project's .mcp.json (sibling of .claude/), since
+// Claude Code does not read MCP server definitions from settings.json — mcpServers only
+// takes effect from .mcp.json (project scope) or `claude mcp add` (local/user scope).
 // Idempotent: safe to run on every install and upgrade.
 // Usage: node merge-settings.cjs <settings-path>
 
 const { readFileSync, writeFileSync, mkdirSync } = require('fs');
-const { dirname, resolve } = require('path');
+const { dirname, resolve, join } = require('path');
 
 const settingsPath = resolve(process.argv[2] ?? '');
 if (!process.argv[2]) {
@@ -22,13 +25,33 @@ try {
   }
 }
 
-// 1. mcpServers.wspec — always set so the server is registered after every install/upgrade
-settings.mcpServers ??= {};
-settings.mcpServers.wspec = {
+// 1. mcpServers.wspec — registered via .mcp.json (see below), not settings.json. Drop any
+// dead mcpServers.wspec key a prior version of this script wrote into settings.json; it was
+// never read by Claude Code, so leaving it behind would just be confusing clutter.
+if (settings.mcpServers && settings.mcpServers.wspec) {
+  delete settings.mcpServers.wspec;
+  if (Object.keys(settings.mcpServers).length === 0) {
+    delete settings.mcpServers;
+  }
+}
+
+const projectRoot = dirname(dirname(settingsPath)); // settingsPath = <root>/.claude/settings.json
+const mcpJsonPath = join(projectRoot, '.mcp.json');
+let mcpJson = {};
+try {
+  mcpJson = JSON.parse(readFileSync(mcpJsonPath, 'utf8'));
+} catch (err) {
+  if (err.code !== 'ENOENT') {
+    process.stderr.write(`Warning: ${mcpJsonPath} is not valid JSON — starting fresh.\n`);
+  }
+}
+mcpJson.mcpServers ??= {};
+mcpJson.mcpServers.wspec = {
   command: 'node',
   args: ['wspec/mcp/dist/cli.js', 'serve'],
   type: 'stdio',
 };
+writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + '\n');
 
 // 2. statusLine — only if not already present (user may have their own)
 if (!settings.statusLine) {

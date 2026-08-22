@@ -249,9 +249,11 @@ override_ttl_days: 14
 #     - Keep proposals under 300 words
 ```
 
-### `.claude/settings.json`
+### `.mcp.json` and `.claude/settings.json`
 
-The installer merges wSpec-owned settings into `.claude/settings.json`:
+The installer writes the MCP server registration into `.mcp.json` at the project root
+(Claude Code only picks up `mcpServers` from `.mcp.json` or `claude mcp add` — not from
+`settings.json`):
 
 ```json
 {
@@ -261,7 +263,14 @@ The installer merges wSpec-owned settings into `.claude/settings.json`:
       "args": ["wspec/mcp/dist/cli.js", "serve"],
       "type": "stdio"
     }
-  },
+  }
+}
+```
+
+It separately merges wSpec-owned settings into `.claude/settings.json`:
+
+```json
+{
   "statusLine": {
     "type": "command",
     "command": "node wspec/mcp/dist/cli.js state:banner"
@@ -269,7 +278,9 @@ The installer merges wSpec-owned settings into `.claude/settings.json`:
 }
 ```
 
-`mcpServers.wspec` registers the MCP server so it auto-starts with Claude Code. `statusLine` shows the active change status in the Claude Code status bar. Existing keys in your `settings.json` are preserved.
+`statusLine` shows the active change status in the Claude Code status bar. Existing keys in
+your `settings.json` (and `.mcp.json`) are preserved. Restart Claude Code after install/upgrade
+so it picks up the new `.mcp.json` registration.
 
 ### `wspec/state.json`
 
