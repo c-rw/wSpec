@@ -13,6 +13,8 @@ $ARGUMENTS
 `/wspec-implement` executes the task phases from `tasks.md` and validates correctness at each phase boundary before moving on.
 
 **Validation stack per phase**:
+0. **Execution evidence** — declared check commands (`wspec/config.yaml`'s `checks:` block, if
+   configured) actually pass; skipped entirely when no `checks:` block exists
 1. **Spec requirements** — FRs and SCs addressed by the phase are implemented and testable
 2. **Analysis findings** — CRITICAL and HIGH findings from `analysis.md` relevant to the phase are resolved or explicitly deferred
 3. **Project principles** — No MUST statements from `wspec/principles.md` are violated
@@ -124,8 +126,20 @@ For each pending task (`- [ ]`) in the phase:
 
 ### 4c. Phase Validation Gate
 
-After **all tasks in the phase are complete**, run MCP tool `wspec.validatePhase` with
-`{ "id": "<CHANGE_ID>", "phase": <phase_num> }`.
+**Stage 0 — execution evidence.** After **all tasks in the phase are complete**, run MCP tool `wspec.runChecks` with
+`{ "id": "<CHANGE_ID>", "phase": <phase_num> }` **first**, before anything else in this step.
+It runs the commands declared in `wspec/config.yaml`'s `checks:` block (test/typecheck/lint) and
+returns a truncated digest, never raw command output. If `enabled` is `false`, no `checks:` block
+is configured — proceed to `wspec.validatePhase` unchanged. If `enabled` is `true` and `status` is
+`fail`, **stop here**: report the failing check(s) by name with their `summary` and `log_path`,
+and do not dispatch `wspec-phase-validator` (below) — a diff review of code that does not build or
+pass its own tests is a wasted pass. Fix the failure, then re-run `wspec.runChecks` before
+continuing.
+
+**Stage 1 — deterministic gate.** Once checks pass (or are not configured), run MCP tool
+`wspec.validatePhase` with `{ "id": "<CHANGE_ID>", "phase": <phase_num> }`. (A `pass` result
+also posts a "Phase N complete" note to the linked ticket automatically, if one is linked —
+no separate action needed here.)
 
 The script returns:
 - `status`: `pass` / `warn` / `fail`
@@ -258,3 +272,6 @@ Run /wspec-finalize to sync specs, commit, and archive.
 - **Never commit bookkeeping alone** — if the only changes are `tasks.md` / `metadata.yaml` under the change folder, defer to the next real commit
 - **Never make a standalone commit for the status flip** — it must ride along with another commit (last phase, or `/wspec-finalize`)
 - If `tasks.md` has no pending tasks, congratulate and suggest `/wspec-finalize`
+- **Never hand-write a ticket comment for progress** — `wspec.setStatus`, `wspec.markTask`,
+  and `wspec.validatePhase` already mirror progress to the linked ticket automatically. If
+  the ticket looks stale, run `wspec.syncTicket` rather than posting a comment by hand.

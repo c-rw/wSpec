@@ -123,14 +123,34 @@ function runGate(gate: GateName): number {
   }
 
   process.stderr.write(`\n[wspec] ${gate} BLOCKED for change '${result.change_id}':\n`);
-  for (const blocker of result.blocking_reasons) {
+  const findingBlockers = result.blocking_reasons.filter(
+    (b): b is Extract<(typeof result.blocking_reasons)[number], { kind: "finding" }> => b.kind === "finding"
+  );
+  const checkBlockers = result.blocking_reasons.filter(
+    (b): b is Extract<(typeof result.blocking_reasons)[number], { kind: "check" }> => b.kind === "check"
+  );
+  for (const blocker of findingBlockers) {
     process.stderr.write(`  - ${blocker.severity} ${blocker.id} (${blocker.category}): ${blocker.summary} [${blocker.location}]\n`);
   }
-  process.stderr.write("\nResolve the finding(s) in analysis.md, or record a reasoned override per finding:\n");
-  for (const blocker of result.blocking_reasons) {
-    process.stderr.write(
-      `  node wspec/mcp/dist/cli.js tool wspec.recordOverride '{"gate":"${gate}","findingId":"${blocker.id}","reason":"<why this is safe>"}'\n`
-    );
+  for (const blocker of checkBlockers) {
+    const location = blocker.log_path ? ` — see ${blocker.log_path}` : "";
+    process.stderr.write(`  - CHECK FAILED: ${blocker.name} (\`${blocker.command}\`)${location}\n`);
+    if (blocker.summary) {
+      for (const line of blocker.summary.split("\n")) {
+        process.stderr.write(`      ${line}\n`);
+      }
+    }
+  }
+  if (findingBlockers.length > 0) {
+    process.stderr.write("\nResolve the finding(s) in analysis.md, or record a reasoned override per finding:\n");
+    for (const blocker of findingBlockers) {
+      process.stderr.write(
+        `  node wspec/mcp/dist/cli.js tool wspec.recordOverride '{"gate":"${gate}","findingId":"${blocker.id}","reason":"<why this is safe>"}'\n`
+      );
+    }
+  }
+  if (checkBlockers.length > 0) {
+    process.stderr.write(`\nFix the failing check(s), then re-run: node wspec/mcp/dist/cli.js tool wspec.runChecks '{"id":"${result.change_id}"}'\n`);
   }
   process.stderr.write('\nOr set WSPEC_OVERRIDE_REASON="..." for a one-shot audited bypass, or use --no-verify to skip hooks entirely.\n');
   return 1;

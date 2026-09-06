@@ -6,7 +6,7 @@ A spec-driven change workflow for Claude Code. Propose, implement, and finalize 
 
 wSpec began as an amalgamation of two other MIT-licensed projects. From [GitHub Spec Kit](https://github.com/github/spec-kit) it took the spec/tasks artifact vocabulary: Given/When/Then acceptance criteria, `FR-NNN`/`SC-NNN` numbering, phased task lists, and the branch-numbering scheme. From [Fission-AI OpenSpec](https://github.com/Fission-AI/OpenSpec) it took the change-folder lifecycle: active changes under `wspec/changes/`, finalized capability specs synced into a separate library, and delta-spec archival.
 
-Everything past that borrowed vocabulary is original: the MCP server (27 tools), the model-pinned subagent layer, the adversarial attack pass, per-phase validation gates, fingerprint-bound overrides with TTL, git and Claude Code hook wiring, and the token/cost ledger. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the exact file-by-file breakdown and both projects' license text.
+Everything past that borrowed vocabulary is original: the MCP server (32 tools), the model-pinned subagent layer, the adversarial attack pass, per-phase validation gates, fingerprint-bound overrides with TTL, git and Claude Code hook wiring, the token/cost ledger, and a living ticket mirror that keeps a linked GitHub/GitLab issue in sync with packet state as work happens. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the exact file-by-file breakdown and both projects' license text.
 
 ## Install
 

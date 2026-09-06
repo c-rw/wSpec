@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { assertChangeBranch, readYamlScalars } from "./changes.js";
+import { assertChangeBranch, readYamlScalars, resolveChangeDir, upsertMetadataScalars } from "./changes.js";
 import { forgeCli, resolveForge, vcsReady, type Forge } from "./forge.js";
 import { runCommand } from "./shell.js";
 import { appendUsageLogLine, loadUsageLedgerFromDir, rollupLedger } from "./usage.js";
@@ -166,10 +166,7 @@ export function archiveChange(repoRoot: string, id: string, dryRun = false) {
 
         const metadataPath = path.join(target, "metadata.yaml");
         if (fs.existsSync(metadataPath)) {
-          let content = fs.readFileSync(metadataPath, "utf8");
-          content = content.replace(/^status\s*:\s*.*$/m, 'status: "done"');
-          content = content.replace(/^updated\s*:\s*.*$/m, `updated: "${today}"`);
-          fs.writeFileSync(metadataPath, content, "utf8");
+          upsertMetadataScalars(metadataPath, { status: "done", updated: today, completed: today });
         }
 
         // Fold this change's usage.json (now living at its archived path) into the durable
@@ -241,23 +238,9 @@ function resolvePostArchiveAction(repoRoot: string, action?: string): "none" | "
 function resolveChangeTitle(repoRoot: string, id: string, explicit?: string): string {
   if (explicit && explicit.trim()) return explicit.trim();
 
-  const today = new Date().toISOString().slice(0, 10);
-  const candidates = [
-    path.join(repoRoot, "wspec", "changes", id, "metadata.yaml"),
-    path.join(repoRoot, "wspec", "archive", `${today}-${id}`, "metadata.yaml")
-  ];
-
-  const archiveDir = path.join(repoRoot, "wspec", "archive");
-  if (fs.existsSync(archiveDir)) {
-    for (const entry of fs.readdirSync(archiveDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !entry.name.endsWith(`-${id}`)) continue;
-      candidates.push(path.join(archiveDir, entry.name, "metadata.yaml"));
-    }
-  }
-
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    const parsed = readYamlScalars(candidate);
+  const resolved = resolveChangeDir(repoRoot, id);
+  if (resolved) {
+    const parsed = readYamlScalars(path.join(resolved.dir, "metadata.yaml"));
     if (parsed.title) return parsed.title;
   }
 
@@ -275,23 +258,18 @@ export function postArchiveAction(
   dryRun = false,
   forge?: string
 ) {
-  const archiveRoot = path.join(repoRoot, "wspec", "archive");
-  if (fs.existsSync(path.join(repoRoot, "wspec", "changes", id, "metadata.yaml"))) {
+  const resolved = resolveChangeDir(repoRoot, id);
+  if (resolved && !resolved.archived) {
     assertChangeBranch(repoRoot, id, `run post-archive action '${action ?? "auto"}'`);
-  } else if (fs.existsSync(archiveRoot)) {
-    const archivedEntry = fs
-      .readdirSync(archiveRoot, { withFileTypes: true })
-      .find((entry) => entry.isDirectory() && entry.name.endsWith(`-${id}`));
-    if (archivedEntry) {
-      const archivedMetadata = readYamlScalars(path.join(archiveRoot, archivedEntry.name, "metadata.yaml"));
-      const expectedBranch = archivedMetadata.branch?.trim();
-      const branchRes = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
-      const currentBranch = branchRes.code === 0 ? branchRes.stdout.trim() : null;
-      if (expectedBranch && currentBranch && currentBranch !== expectedBranch) {
-        throw new Error(
-          `Refusing to run post-archive action for change '${id}' on branch '${currentBranch}'. Expected branch '${expectedBranch}'. Switch to the change branch and retry.`
-        );
-      }
+  } else if (resolved?.archived) {
+    const archivedMetadata = readYamlScalars(path.join(resolved.dir, "metadata.yaml"));
+    const expectedBranch = archivedMetadata.branch?.trim();
+    const branchRes = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
+    const currentBranch = branchRes.code === 0 ? branchRes.stdout.trim() : null;
+    if (expectedBranch && currentBranch && currentBranch !== expectedBranch) {
+      throw new Error(
+        `Refusing to run post-archive action for change '${id}' on branch '${currentBranch}'. Expected branch '${expectedBranch}'. Switch to the change branch and retry.`
+      );
     }
   }
 
@@ -403,6 +381,18 @@ export function postArchiveAction(
           .filter((line) => /^https?:\/\//.test(line))
           .pop();
         result.pr_url = url ?? null;
+
+        // Persist so the ticket-mirror render stays a pure function of packet state — passing
+        // this URL in as transient render data would make it vanish on the next re-render.
+        if (result.pr_url) {
+          const target = resolveChangeDir(repoRoot, id);
+          if (target) {
+            const metadataPath = path.join(target.dir, "metadata.yaml");
+            if (fs.existsSync(metadataPath)) {
+              upsertMetadataScalars(metadataPath, { pr_url: result.pr_url });
+            }
+          }
+        }
       }
       return result;
     }

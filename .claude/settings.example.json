@@ -71,7 +71,7 @@
       }
     ]
   },
-  "_permissions_comment": "Read-only wspec MCP tools and read-only git inspection are auto-allowed to cut friction. Mutating tools (setStatus, markTask, archive, postArchive, syncSpec apply:true, appendFindings, recordOverride) and mutating git (commit/push/merge) are deliberately left ungated here so Claude Code's normal per-call prompt still applies.",
+  "_permissions_comment": "Read-only wspec MCP tools and read-only git inspection are auto-allowed to cut friction. Mutating tools (setStatus, markTask, archive, postArchive, syncSpec apply:true, appendFindings, recordOverride) and mutating git (commit/push/merge) are deliberately left ungated here so Claude Code's normal per-call prompt still applies. wspec.forgeCaps is read-only. wspec.syncTicket is allowed despite writing to the forge because its content is fully derived from repo state (never free-form model text), it only ever touches a ticket wSpec was already linked to, and it's idempotent (a body_hash match is a no-op). wspec.bindTicket stays gated — it creates tickets and mutates metadata.yaml.",
   "permissions": {
     "allow": [
       "Bash(node wspec/mcp/dist/cli.js:*)",
@@ -88,7 +88,9 @@
       "mcp__wspec__wspec.doctor",
       "mcp__wspec__wspec.listIssues",
       "mcp__wspec__wspec.getIssue",
-      "mcp__wspec__wspec.usageReport"
+      "mcp__wspec__wspec.usageReport",
+      "mcp__wspec__wspec.forgeCaps",
+      "mcp__wspec__wspec.syncTicket"
     ]
   }
 }

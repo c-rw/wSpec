@@ -80,7 +80,8 @@ If this refresh surfaced a concrete new risk that should gate implementation and
 `wspec.appendFindings` with `{ "id": "<CHANGE_ID>", "findings": [{ "category": ..., "severity":
 ..., "location": ..., "summary": ... }] }` merges it in deterministically (dedupe + renumber)
 without needing a full `wspec-analyst` re-run. Ask the user before adding a CRITICAL/HIGH finding
-this way, since it will start blocking gates immediately.
+this way, since it will start blocking gates immediately — and, if a ticket is linked, post a
+comment there too, so the risk is visible outside this terminal.
 
 ---
 

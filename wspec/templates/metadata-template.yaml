@@ -4,13 +4,19 @@ title: "{{Human Readable Title}}"
 status: "drafting"  # drafting | ready | implementing | done
 
 branch: "feat/{{NNN}}-{{kebab-name}}"
-capability: ""  # optional: capability domain for spec sync, e.g. "auth" or "payments"
-                # used by /wspec-finalize to sync delta specs into wspec/specs/<capability>/
+capability: ""  # domain for spec sync at finalize, e.g. "auth" or "payments"; leave empty if unclear
 
-issue: ""  # optional: source tracker issue number, set by /wspec-propose when proposing
-           # from a /wspec-capture issue. /wspec-finalize closes this issue on archive.
+issue: ""        # tracker issue number, set by wspec.bindTicket — never hand-typed
+issue_url: ""    # full web URL, set alongside issue
+issue_forge: ""  # "github" | "gitlab" — pins which forge this ticket lives on
+milestone: ""    # resolved milestone title (see wspec/config.yaml's ticket: block)
+due_date: ""     # YYYY-MM-DD; GitLab only, GitHub issues have no due-date field
 
 estimated_effort: ""  # optional: rough total effort, e.g. "~3 days", "1 week", "4 hours"
+
+started: ""    # YYYY-MM-DD, set automatically on the first drafting -> implementing transition
+completed: ""  # YYYY-MM-DD, set automatically by wspec.archive
+pr_url: ""     # set automatically by the post-archive action, if it opens a PR/MR
 
 created: "{{ISO_DATE}}"
 updated: "{{ISO_DATE}}"

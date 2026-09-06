@@ -109,6 +109,15 @@
               "task_ids": {
                 "type": "array",
                 "items": { "type": "string", "pattern": "^T[0-9]{3}$" }
+              },
+              "has_test": {
+                "type": "boolean",
+                "description": "True when at least one task_ids entry also carries a [unit]/[intg]/[e2e] test-level tag. Optional: absent on packets predating this field, or when wspec.computeCoverage was not run."
+              },
+              "test_ids": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^T[0-9]{3}$" },
+                "description": "Subset of task_ids that are test tasks proving this requirement. A task id, not a runner-level test name — tasks.md has no visibility into individual test cases."
               }
             }
           }

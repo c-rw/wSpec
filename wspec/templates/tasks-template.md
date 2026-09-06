@@ -18,7 +18,7 @@ description: "wSpec task list template"
 ## Format
 
 ```text
-- [ ] T### [P?] [US#?] [size?] [test-level?] Description — file/path/hint
+- [ ] T### [P?] [US#?] [size?] [test-level?] [FR-NNN?] Description — file/path/hint
       Seam: [optional — how to safely intercept existing behavior]
 ```
 
@@ -26,6 +26,11 @@ description: "wSpec task list template"
 - **[US#]**: User scenario this task serves (maps to spec.md scenarios)
 - **[size]**: Optional effort signal — S (< 1 hour), M (half-day), L (full day), XL (multi-day)
 - **[test-level]**: For test tasks — `unit`, `intg`, or `e2e`
+- **[FR-NNN]/[SC-NNN]**: Optional — tags the requirement this task proves, read by
+  `wspec.computeCoverage` to build `analysis.md`'s `coverage_gaps[]` deterministically (does this
+  requirement have a task, and does that task also carry a test-level tag). A task can carry more
+  than one requirement tag. Untagged tasks are invisible to coverage tracking, not an error —
+  tag the tasks that matter for traceability, not every task.
 - **Seam**: For tasks modifying existing code without tests — name the injection point or override hook to use instead of modifying behavior directly (constructor injection, interface extraction, subclass-and-override, etc.)
 - Include exact file paths or module hints in descriptions
 
@@ -66,10 +71,10 @@ description: "wSpec task list template"
 
 ### Implementation — Scenario 1
 
-- [ ] T010 [P] [US1] [task description] — src/path/to/file
+- [ ] T010 [P] [US1] [FR-001] [task description] — src/path/to/file
 - [ ] T011 [P] [US1] [task description] — src/path/to/file
 - [ ] T012 [US1] [task description, depends on T010] — src/path/to/file
-- [ ] T013 [US1] [task description] — src/path/to/file
+- [ ] T013 [US1] [unit] [FR-001] [task description testing T010's behavior] — tests/path/to/file
 
 **Validation Checkpoint** *(auto-checked by /wspec-implement)*:
 

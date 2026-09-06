@@ -97,6 +97,57 @@ export function readYamlScalars(filePath: string): Record<string, string> {
   return output;
 }
 
+/**
+ * Update or append flat `key: "value"` scalar lines in a metadata.yaml file. `readYamlScalars`
+ * requires the key at column 0 with no leading whitespace, so this writer matches that same
+ * shape — anything else would be silently invisible to every reader in this codebase.
+ *
+ * Fixes a latent bug in the pre-existing hand-rolled `content.replace(/^key\s*:.*$/m, ...)`
+ * pattern (still used ad hoc before this helper existed): when the key line is absent —
+ * true of every packet's metadata.yaml created before a given field was added to the template —
+ * `.replace()` silently no-ops instead of erroring. This always appends when the key is missing.
+ */
+export function upsertMetadataScalars(metadataPath: string, values: Record<string, string>): void {
+  let content = fs.readFileSync(metadataPath, "utf8");
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+
+  for (const [key, value] of Object.entries(values)) {
+    const pattern = new RegExp(`^${key}\\s*:.*$`, "m");
+    const line = `${key}: "${value}"`;
+    if (pattern.test(content)) {
+      content = content.replace(pattern, line);
+    } else {
+      content = `${content.replace(/\s*$/, "")}${eol}${line}${eol}`;
+    }
+  }
+
+  fs.writeFileSync(metadataPath, content, "utf8");
+}
+
+/**
+ * Resolve a change id to its directory whether it's still active (`wspec/changes/<id>/`) or has
+ * already been archived (`wspec/archive/YYYY-MM-DD-<id>/`). Consolidates lookup logic that used
+ * to be duplicated across finalize.ts's `resolveChangeTitle` and `postArchiveAction`.
+ */
+export function resolveChangeDir(repoRoot: string, id: string): { dir: string; archived: boolean } | null {
+  const activeDir = path.join(repoRoot, "wspec", "changes", id);
+  if (fs.existsSync(activeDir)) {
+    return { dir: activeDir, archived: false };
+  }
+
+  const archiveRoot = path.join(repoRoot, "wspec", "archive");
+  if (fs.existsSync(archiveRoot)) {
+    const entry = fs
+      .readdirSync(archiveRoot, { withFileTypes: true })
+      .find((e) => e.isDirectory() && e.name.endsWith(`-${id}`));
+    if (entry) {
+      return { dir: path.join(archiveRoot, entry.name), archived: true };
+    }
+  }
+
+  return null;
+}
+
 export function getCurrentBranch(repoRoot: string): string | null {
   const currentBranchResult = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
   return currentBranchResult.code === 0 ? currentBranchResult.stdout.trim() : null;
@@ -332,6 +383,57 @@ export function findingAffectsPhase(finding: { affects_phases: string[] }, phase
   return finding.affects_phases.length === 0 || finding.affects_phases.includes(phaseLabel);
 }
 
+export interface ParsedClarification {
+  question: string;
+  answer: string;
+}
+
+/**
+ * Parse spec.md's `## Clarifications` section — Q → A pairs recorded during /wspec-propose's
+ * Phase 2. Each entry is a `- Q: ... → A: ...` bullet that soft-wraps across several physical
+ * lines (confirmed against real generated spec.md files across multiple repos); a new entry
+ * starts wherever a line begins with `- Q:`, everything up to the next one (or section end)
+ * belongs to the current entry. When propose asked no questions, the section is a single prose
+ * sentence ("None — ...") with no `- Q:` markers at all, which correctly yields zero entries
+ * here rather than a false match.
+ */
+export function parseClarifications(specPath: string): ParsedClarification[] {
+  const content = readFileIfExists(specPath);
+  if (!content) return [];
+
+  const lines = content.split(/\r?\n/);
+  const startIdx = lines.findIndex((line) => /^##\s+Clarifications\s*$/.test(line));
+  if (startIdx < 0) return [];
+
+  let endIdx = lines.findIndex((line, i) => i > startIdx && /^##\s+/.test(line));
+  if (endIdx < 0) endIdx = lines.length;
+
+  const section = lines.slice(startIdx + 1, endIdx);
+  const entryStarts: number[] = [];
+  for (let i = 0; i < section.length; i += 1) {
+    if (/^\s*-\s*Q:/.test(section[i])) entryStarts.push(i);
+  }
+
+  const clarifications: ParsedClarification[] = [];
+  for (let i = 0; i < entryStarts.length; i += 1) {
+    const start = entryStarts[i];
+    const end = i + 1 < entryStarts.length ? entryStarts[i + 1] : section.length;
+    const text = section
+      .slice(start, end)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const match = /^-\s*Q:\s*(.*?)\s*→\s*A:\s*(.*)$/.exec(text);
+    if (!match) continue;
+    const question = match[1].trim();
+    const answer = match[2].trim();
+    if (question && answer) clarifications.push({ question, answer });
+  }
+
+  return clarifications;
+}
+
 export function parsePrinciplesMusts(principlesPath: string): string[] {
   const content = readFileIfExists(principlesPath);
   if (!content) {
@@ -448,6 +550,16 @@ export function getChangeSummary(changeDir: string, repoRoot: string) {
     status: metadata.status,
     branch: metadata.branch,
     capability: metadata.capability,
+    issue: metadata.issue || null,
+    issue_url: metadata.issue_url || null,
+    issue_forge: metadata.issue_forge || null,
+    milestone: metadata.milestone || null,
+    due_date: metadata.due_date || null,
+    created: metadata.created || null,
+    started: metadata.started || null,
+    completed: metadata.completed || null,
+    estimated_effort: metadata.estimated_effort || null,
+    pr_url: metadata.pr_url || null,
     tasks: {
       total: tasks.total,
       done: tasks.done,
@@ -546,6 +658,16 @@ export function loadChangeContext(repoRoot: string, id: string) {
     status: summary.status,
     branch: summary.branch,
     capability: summary.capability,
+    issue: summary.issue,
+    issue_url: summary.issue_url,
+    issue_forge: summary.issue_forge,
+    milestone: summary.milestone,
+    due_date: summary.due_date,
+    created: summary.created,
+    started: summary.started,
+    completed: summary.completed,
+    estimated_effort: summary.estimated_effort,
+    pr_url: summary.pr_url,
     current_branch,
     branch_matches: current_branch === summary.branch,
     tasks: summary.tasks,
@@ -571,11 +693,13 @@ export function setChangeStatus(repoRoot: string, id: string, status: "drafting"
   const previous_status = metadata.status;
   const updated = new Date().toISOString().slice(0, 10);
 
-  let content = fs.readFileSync(metadataPath, "utf8");
-  content = content.replace(/^status\s*:.*$/m, `status: "${status}"`);
-  content = content.replace(/^updated\s*:.*$/m, `updated: "${updated}"`);
-
-  fs.writeFileSync(metadataPath, content, "utf8");
+  const values: Record<string, string> = { status, updated };
+  // First transition into implementing is the packet's real start date — never overwritten by a
+  // later transition back to implementing (e.g. after a finding reopens work).
+  if (status === "implementing" && !metadata.started) {
+    values.started = updated;
+  }
+  upsertMetadataScalars(metadataPath, values);
 
   return {
     change_id: id,

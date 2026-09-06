@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fingerprintFinding, getCurrentBranch, parseAnalysisBlock, readYamlScalars } from "./changes.js";
+import { readChecksConfig, readLatestChecks } from "./checks.js";
 import { loadState, verifyState, writeStateWithOverrides, type StateOverride } from "./state.js";
 
 export type GateName = "pre-commit" | "pre-push" | "manual";
@@ -36,7 +37,7 @@ export function appendOverrideLog(repoRoot: string, line: string): void {
   }
 }
 
-interface BlockingReason {
+interface FindingBlockingReason {
   kind: "finding";
   id: string;
   severity: string;
@@ -45,6 +46,16 @@ interface BlockingReason {
   location: string;
   fingerprint: string;
 }
+
+interface CheckBlockingReason {
+  kind: "check";
+  name: string;
+  command: string;
+  summary: string | null;
+  log_path: string | null;
+}
+
+type BlockingReason = FindingBlockingReason | CheckBlockingReason;
 
 export interface GateResult {
   gate: GateName;
@@ -134,6 +145,32 @@ export function gateCheck(repoRoot: string, gate: GateName, changeId?: string): 
     const verification = verifyState(repoRoot);
     if (!verification.in_sync) {
       result.warnings.push(`state.json out of sync (${verification.drift.join(", ")}); run wspec.syncState.`);
+    }
+
+    // Execution-evidence gate. Only activates once checks: is declared in config.yaml — a repo
+    // that never configured it sees no change here. Once configured, a change that never ran
+    // wspec.runChecks gets a warning (not a hard block, so enabling checks: doesn't retroactively
+    // brick a push mid-implementation); a change with a recorded failing required check blocks.
+    const checksConfig = readChecksConfig(repoRoot);
+    if (checksConfig) {
+      const lastChecks = readLatestChecks(repoRoot, id);
+      if (!lastChecks) {
+        result.warnings.push(
+          `checks: configured but wspec.runChecks has not been run for '${id}' yet; not blocking this push, but /wspec-implement will start requiring it.`
+        );
+      } else if (lastChecks.status === "fail") {
+        for (const check of lastChecks.checks) {
+          if (check.required && check.status !== "pass") {
+            result.blocking_reasons.push({
+              kind: "check",
+              name: check.name,
+              command: check.command,
+              summary: check.summary,
+              log_path: check.log_path
+            });
+          }
+        }
+      }
     }
   }
 

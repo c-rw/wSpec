@@ -1,13 +1,25 @@
 import { z } from "zod";
 import { createFeatureBranch } from "./branch.js";
-import { listChangeSummaries, loadChangeContext, lockPrinciples, markTaskState, setChangeStatus, validatePhase } from "./changes.js";
+import {
+  listChangeSummaries,
+  loadChangeContext,
+  lockPrinciples,
+  markTaskState,
+  parseAnalysisBlock,
+  setChangeStatus,
+  validatePhase
+} from "./changes.js";
+import { computeCoverage } from "./coverage.js";
+import { runChecks } from "./checks.js";
 import { runDoctor } from "./doctor.js";
 import { archiveChange, postArchiveAction, syncSpec } from "./finalize.js";
 import { appendFindings, type IncomingFinding } from "./findings.js";
+import { getForgeCaps } from "./forgeCaps.js";
 import { closeIssue, commentIssue, createIssue, ensureLabel, getIssue, listIssues, updateIssue } from "./issues.js";
 import { findRepoRoot } from "./root.js";
 import { repoScan } from "./scan.js";
 import { loadState, verifyState, writeState, writeStateBestEffort } from "./state.js";
+import { bindTicket, readTicketConfig, syncTicket, syncTicketBestEffort } from "./ticket.js";
 import { validateAll } from "./validateAll.js";
 import { validateAnalysisFile } from "./validate.js";
 import { gateCheck, recordOverride } from "./gate.js";
@@ -17,6 +29,7 @@ import {
   emptyTotals,
   loadUsageLedger,
   readUsageLog,
+  rollupByCommand,
   rollupLedger,
   type TokenTotals
 } from "./usage.js";
@@ -65,6 +78,15 @@ const markTaskSchema = z.object({
 const validatePhaseSchema = z.object({
   id: z.string().min(1),
   phase: z.number().int().min(1)
+});
+
+const runChecksSchema = z.object({
+  id: z.string().min(1),
+  phase: z.number().int().min(1).optional()
+});
+
+const computeCoverageSchema = z.object({
+  id: z.string().min(1)
 });
 
 const lockPrinciplesSchema = z.object({
@@ -162,6 +184,52 @@ const postArchiveSchema = z.object({
   forge: z.enum(["github", "gitlab"]).optional()
 });
 
+const forgeCapsSchema = z.object({
+  refresh: z.boolean().optional(),
+  forge: forgeEnum
+});
+
+const ticketEventEnum = z.enum([
+  "packet_created",
+  "implementation_started",
+  "phase_complete",
+  "finding_critical",
+  "checks_failed",
+  "blocked",
+  "archived"
+]);
+
+const syncTicketSchema = z.object({
+  id: z.string().min(1),
+  event: ticketEventEnum.optional(),
+  phase: z.number().int().min(1).optional(),
+  findingIds: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
+  force: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+  forge: forgeEnum
+});
+
+const bindTicketSchema = z
+  .object({
+    id: z.string().min(1),
+    number: z.number().int().positive().optional(),
+    create: z.boolean().optional(),
+    title: z.string().optional(),
+    body: z.string().optional(),
+    labels: z.array(z.string()).optional(),
+    milestone: z.string().optional(),
+    dueDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    dryRun: z.boolean().optional(),
+    forge: forgeEnum
+  })
+  .refine((v) => v.number !== undefined || v.create === true, {
+    message: "Provide `number` to bind an existing issue, or `create: true`"
+  });
+
 export const toolDefinitions = [
   {
     name: "wspec.createFeatureBranch",
@@ -239,6 +307,8 @@ export const toolDefinitions = [
       const repoRoot = findRepoRoot();
       const result = setChangeStatus(repoRoot, input.id, input.status);
       writeStateBestEffort(repoRoot);
+      const event = input.status === "implementing" && result.previous_status !== "implementing" ? "implementation_started" : undefined;
+      syncTicketBestEffort(repoRoot, input.id, event);
       return result;
     }
   },
@@ -261,6 +331,13 @@ export const toolDefinitions = [
       const repoRoot = findRepoRoot();
       const result = markTaskState(repoRoot, input.id, input.taskId, input.pending ?? false, input.dryRun ?? false);
       writeStateBestEffort(repoRoot);
+      // Only the "task" tier mirrors every tick. "phase" (default) and "transition" both leave
+      // phase-boundary syncing to wspec.validatePhase below — it's the one place that actually
+      // *knows* a phase closed, so it's the sole trigger rather than a second guess made here
+      // from a completed-task's position in tasks.md.
+      if (result.applied && readTicketConfig(repoRoot).sync_on === "task") {
+        syncTicketBestEffort(repoRoot, input.id);
+      }
       return result;
     }
   },
@@ -279,7 +356,53 @@ export const toolDefinitions = [
     run: (args: unknown) => {
       const input = validatePhaseSchema.parse(args);
       const repoRoot = findRepoRoot();
-      return validatePhase(repoRoot, input.id, input.phase);
+      const result = validatePhase(repoRoot, input.id, input.phase);
+      // The one place in the system that *knows* a phase closed — this is the fold-in site for
+      // the "Phase N complete" comment, not markTask (which only sees individual ticks).
+      if (result.status === "pass") {
+        syncTicketBestEffort(repoRoot, input.id, "phase_complete", { phase: input.phase });
+      }
+      return result;
+    }
+  },
+  {
+    name: "wspec.runChecks",
+    description:
+      "Execution-evidence gate: run the check commands declared in wspec/config.yaml's checks: block (test/typecheck/lint) for a change, and report pass/fail. Returns a truncated digest plus a log file path per failing check — never the raw command output. Returns { enabled: false } when no checks: block is configured (pass-through, no behavior change).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        phase: { type: "number" }
+      },
+      required: ["id"],
+      additionalProperties: false
+    },
+    run: (args: unknown) => {
+      const input = runChecksSchema.parse(args);
+      const repoRoot = findRepoRoot();
+      const report = runChecks(repoRoot, input.id, input.phase ?? null);
+      writeStateBestEffort(repoRoot);
+      syncTicketBestEffort(repoRoot, input.id, report.status === "fail" ? "checks_failed" : undefined);
+      return report;
+    }
+  },
+  {
+    name: "wspec.computeCoverage",
+    description:
+      "Deterministically match spec.md FR-NNN/SC-NNN requirements against tasks.md tasks tagged with a matching [FR-NNN]/[SC-NNN] marker, and note whether any matching task also carries a [unit]/[intg]/[e2e] test-level tag. Pure string matching, not judgment — intended as input to the wspec-analyst subagent's coverage-gap pass, not a replacement for it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" }
+      },
+      required: ["id"],
+      additionalProperties: false
+    },
+    run: (args: unknown) => {
+      const input = computeCoverageSchema.parse(args);
+      const repoRoot = findRepoRoot();
+      return computeCoverage(repoRoot, input.id);
     }
   },
   {
@@ -348,6 +471,9 @@ export const toolDefinitions = [
       const repoRoot = findRepoRoot();
       const result = archiveChange(repoRoot, input.id, input.dryRun ?? false);
       writeStateBestEffort(repoRoot);
+      if (!input.dryRun && result.moved) {
+        syncTicketBestEffort(repoRoot, input.id, "archived");
+      }
       return result;
     }
   },
@@ -496,6 +622,20 @@ export const toolDefinitions = [
       const repoRoot = findRepoRoot();
       const result = appendFindings(repoRoot, input.id, input.findings as IncomingFinding[]);
       writeStateBestEffort(repoRoot);
+
+      if (result.added.length > 0) {
+        const threshold = readTicketConfig(repoRoot).comment_findings_at;
+        if (threshold !== "never") {
+          const analysisPath = path.join(repoRoot, "wspec", "changes", input.id, "analysis.md");
+          const merged = parseAnalysisBlock(analysisPath);
+          const bySeverity = new Set(threshold === "CRITICAL" ? ["CRITICAL"] : ["CRITICAL", "HIGH"]);
+          const qualifying = merged.findings.filter((f) => result.added.includes(f.id) && bySeverity.has(f.severity)).map((f) => f.id);
+          if (qualifying.length > 0) {
+            syncTicketBestEffort(repoRoot, input.id, "finding_critical", { findingIds: qualifying });
+          }
+        }
+      }
+
       return result;
     }
   },
@@ -693,23 +833,13 @@ export const toolDefinitions = [
         const ledger = loadUsageLedger(repoRoot, input.id);
         const rollup = rollupLedger(ledger);
 
-        const byCommand: Record<string, { tokens: TokenTotals; cost_usd: number; count: number }> = {};
-        for (const segment of ledger.segments) {
-          const existing = byCommand[segment.command] ?? { tokens: emptyTotals(), cost_usd: 0, count: 0 };
-          byCommand[segment.command] = {
-            tokens: addTotals(existing.tokens, segment.tokens),
-            cost_usd: existing.cost_usd + segment.cost_usd,
-            count: existing.count + 1
-          };
-        }
-
         return {
           change_id: input.id,
           segment_count: ledger.segments.length,
           tokens: rollup.tokens,
           cost_usd: rollup.cost_usd,
           by_model: rollup.by_model,
-          by_command: byCommand
+          by_command: rollupByCommand(ledger)
         };
       }
 
@@ -744,6 +874,79 @@ export const toolDefinitions = [
         })),
         totals: { tokens, cost_usd: costUsd }
       };
+    }
+  },
+  {
+    name: "wspec.forgeCaps",
+    description:
+      "Read-only capability probe for the linked forge (GitHub via gh, GitLab via glab): CLI presence, auth, and which ticket-mirror features are usable (due dates, milestones, quick actions, sub-issues, dependencies). Cached; pass refresh:true to re-probe.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        refresh: { type: "boolean" },
+        forge: { type: "string", enum: ["github", "gitlab"] }
+      },
+      additionalProperties: false
+    },
+    run: (args: unknown) => {
+      const input = forgeCapsSchema.parse(args ?? {});
+      const repoRoot = findRepoRoot();
+      return getForgeCaps(repoRoot, input.forge, { refresh: input.refresh });
+    }
+  },
+  {
+    name: "wspec.syncTicket",
+    description:
+      "Re-render the linked ticket's body from current packet state and, if 'event' is given and not already posted, append one event comment. Never fails a wSpec command over ticket I/O — returns { skipped: true, reason } instead of throwing. dryRun:true performs zero gh/glab calls and returns the rendered markdown, for offline verification with no CLI or auth required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        event: {
+          type: "string",
+          enum: ["packet_created", "implementation_started", "phase_complete", "finding_critical", "checks_failed", "blocked", "archived"]
+        },
+        phase: { type: "number" },
+        findingIds: { type: "array", items: { type: "string" } },
+        warnings: { type: "array", items: { type: "string" } },
+        force: { type: "boolean" },
+        dryRun: { type: "boolean" },
+        forge: { type: "string", enum: ["github", "gitlab"] }
+      },
+      required: ["id"],
+      additionalProperties: false
+    },
+    run: (args: unknown) => {
+      const input = syncTicketSchema.parse(args);
+      const repoRoot = findRepoRoot();
+      return syncTicket(repoRoot, input.id, input);
+    }
+  },
+  {
+    name: "wspec.bindTicket",
+    description:
+      "Link a change packet to a forge ticket — an existing one (`number`) or a newly created one (`create: true`) — and persist issue/issue_url/issue_forge/milestone/due_date into metadata.yaml. Ensures a milestone (defaulting to the change's capability) and, on GitLab, a due date derived from estimated_effort, where the forge supports it. Posts the first packet_created render. Never throws — returns { skipped: true, reason } on failure.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        number: { type: "number" },
+        create: { type: "boolean" },
+        title: { type: "string" },
+        body: { type: "string" },
+        labels: { type: "array", items: { type: "string" } },
+        milestone: { type: "string" },
+        dueDate: { type: "string" },
+        dryRun: { type: "boolean" },
+        forge: { type: "string", enum: ["github", "gitlab"] }
+      },
+      required: ["id"],
+      additionalProperties: false
+    },
+    run: (args: unknown) => {
+      const input = bindTicketSchema.parse(args);
+      const repoRoot = findRepoRoot();
+      return bindTicket(repoRoot, input.id, input);
     }
   }
 ] as const;

@@ -42,6 +42,19 @@ implement_phase_commits: ask
 # resolved. Default 14.
 override_ttl_days: 14
 
+# Execution-evidence gate (wspec.runChecks). Commands run as evidence at phase gates
+# (/wspec-implement step 4c, before the LLM diff-review subagent) and on pre-push.
+# Declared, not inferred — this is what keeps wSpec language-agnostic: a PowerShell repo
+# writes `Invoke-Pester`, a Python repo writes `pytest`. Absent or empty means the feature
+# is off and nothing here changes existing behavior.
+#
+# checks:
+#   test: "npm run test"
+#   typecheck: "npm run check"
+#   lint: ""                # blank/omitted = skip
+#   required: [test]        # which commands must pass to clear a gate; others are advisory
+#   timeout_ms: 120000       # optional, default 120000
+
 # Strategy used by /wspec-finalize when post_archive_action is "merge".
 # Values:
 #   ask    — prompt per change (default)
@@ -65,3 +78,28 @@ merge_strategy: ask
 #     - Break tasks into chunks of max 2 hours
 #   spec:
 #     - All FRs must reference a user story
+
+# Living ticket mirror. When a change packet has a linked forge ticket (metadata.yaml's
+# `issue:`, set by wspec.bindTicket), wSpec keeps its description re-rendered from packet state
+# on each transition — phase checklist, findings, checks, spend, dates — and posts short comments
+# on meaningful events. The mirror is inert with no linked ticket, so this whole block is safe to
+# leave commented out: absence always means these defaults, never "off". Uncomment to override.
+#
+# ticket:
+#   enabled: true              # master switch
+#   create_on_propose: ask     # ask | always | never — offer to create a ticket from
+#                              # /wspec-propose when the change has no source issue
+#   sync_on: phase             # transition | phase | task — how often the body re-renders from
+#                              # wspec.markTask; transition/phase/appendFindings/archive always
+#                              # re-render regardless of this setting
+#   events: [packet_created, implementation_started, phase_complete, finding_critical, archived]
+#                              # which events post a comment; also available: checks_failed,
+#                              # blocked (off by default — noisy)
+#   comment_findings_at: CRITICAL   # CRITICAL | HIGH | never
+#   show_spend: true           # include the running token/cost table in the body
+#   milestone: capability      # capability | none | "<fixed title>" — capability uses
+#                              # metadata.yaml's `capability` field as the milestone title
+#   due_from_effort: true      # derive a due date from estimated_effort (GitLab only — GitHub
+#                              # issues have no due-date field, only milestone due dates)
+#   close_on_finalize: true    # close the ticket when /wspec-finalize archives the change
+#   timeout_ms: 15000          # per forge CLI call; a slow/offline forge never blocks wSpec

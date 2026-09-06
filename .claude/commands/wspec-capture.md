@@ -126,7 +126,8 @@ On approval:
 **Updated**
 - #<n> <title> — <url> (body merged | commented)
 
-Run /wspec-propose #<n> to turn any of these into a full change packet.
+Run /wspec-propose #<n> to turn any of these into a full change packet — the ticket then
+tracks phases, findings, spend, and dates automatically as work happens.
 Keep dumping — a follow-up /wspec-capture in this thread will route into these same tickets.
 ```
 
