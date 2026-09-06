@@ -20,6 +20,12 @@ Your prompt will name these paths; read all of them:
 - `wspec/changes/<CHANGE_ID>/tasks.md`
 - `wspec/principles.md`
 
+Your prompt will also paste the precomputed `gaps` array from `wspec.computeCoverage` — a
+deterministic FR/SC → task → test match by tag lookup (`[FR-NNN]` on a task, `[unit]`/`[intg]`/
+`[e2e]` marking it as a test). Treat it as authoritative for "does this requirement have a task,
+does that task have a test": do not re-derive it by re-scanning `tasks.md` yourself. Your job on
+top of it is the judgment call a string match can't make — see Pass 2's Coverage gaps entry.
+
 Run the two passes below **in order**. Pass 1 must be complete before Pass 2 begins — attacking
 the spec first, before you have ten other detection passes competing for attention, is what keeps
 the adversarial reasoning sharp instead of diluted into just another checklist item.
@@ -55,7 +61,12 @@ Produce, in your head at this stage (not yet in final output form):
 Now read `research.md`, `proposal.md`, `tasks.md`, and `principles.md`, and run all of these,
 folding results into the same findings set as Pass 1:
 
-- **Coverage gaps**: FRs or SCs with no associated task
+- **Coverage gaps**: from the precomputed `gaps` array (do not re-derive) — a `has_task: false`
+  entry is a `Coverage Gap` finding, severity HIGH (an untagged requirement has no evidence it
+  will be built); a `has_task: true, has_test: false` entry is a `Coverage Gap` finding, severity
+  MEDIUM (built but no declared evidence it works). A requirement absent from `gaps` entirely
+  (untagged in both spec.md and tasks.md) is not flagged here — that is an untagging problem, not
+  a coverage gap; note it only if it also reads as Underspecification.
 - **Ambiguity**: vague adjectives without measurable targets
 - **Inconsistency**: terminology drift or conflicting statements across artifacts
 - **Principles**: any MUST violation or missing required section

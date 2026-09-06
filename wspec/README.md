@@ -69,9 +69,9 @@ Run `/wspec-propose #<n>` on any captured issue to turn it into a full change pa
 2. Asks for optional reference URLs
 3. Asks 3–5 high-impact clarifying questions, one at a time, with recommendations
 4. Confirms and creates a `feat/NNN-name` branch
-5. Generates `research.md`, `proposal.md`, `spec.md`, `design.md`, `tasks.md`
+5. Generates `research.md`, `proposal.md`, `spec.md`, `design.md`, `tasks.md`; binds the ticket (`wspec.bindTicket` - links the source issue, or creates one per `ticket.create_on_propose`)
 6. Adversarially attacks the spec and runs the cross-artifact scan in one pass via the `wspec-analyst` subagent (model: opus, Phase 4.55) - boundary, edge-case, and cross-artifact findings feed into `analysis.md` as CRITICAL/HIGH findings that gate `/wspec-implement`, checked with `wspec.validateAnalysis`
-7. Offers to commit the packet, then comments the branch/packet link back on the source issue (`wspec.commentIssue`) if one was used
+7. Offers to commit the packet
 
 ### `/wspec-research [change-id]`
 
@@ -103,9 +103,10 @@ Branch requirement: implementation must run from the change branch recorded in `
 2. Checks task and artifact completion (warns on gaps, never silently ignores)
 3. Diffs and optionally merges delta specs from the change into `wspec/specs/<capability>/`
 4. Prompts for a final commit
-5. Archives the change to `wspec/archive/YYYY-MM-DD-NNN-name/`
-6. Closes the linked source issue (`wspec.closeIssue`), if `metadata.yaml` has one, with a closing comment pointing at the archive path
-7. Optional post-archive action: open PR, merge locally, or skip (config-driven)
+5. Archives the change to `wspec/archive/YYYY-MM-DD-NNN-name/` - if a ticket is linked, this
+   automatically posts the final render (all phases checked, spend, elapsed time) and closes it
+   (`ticket.close_on_finalize`, default on)
+6. Optional post-archive action: open PR, merge locally, or skip (config-driven)
 
 ---
 
@@ -144,7 +145,10 @@ wspec/
     hooks/              # git hook shims (pre-commit, pre-push, etc.)
   changes/
     NNN-kebab-name/     # Active change packet
-      metadata.yaml     # id, title, status, branch, capability, issue (source tracker issue, if proposed from /wspec-capture)
+      metadata.yaml     # id, title, status, branch, capability; issue/issue_url/issue_forge,
+                        # milestone, due_date, started, completed, pr_url (ticket mirror,
+                        # see Ticket Mirror below)
+      .ticket/          # Ticket-mirror receipt + prelude cache (gitignored, machine-local)
       research.md       # Prior art, references, risks, recommendation
       proposal.md       # What & why
       spec.md           # Requirements, scenarios, acceptance criteria
@@ -167,17 +171,64 @@ wspec/
 
 ## Validation
 
-`/wspec-implement` validates every phase against three sources:
+`/wspec-implement` validates every phase against four sources:
 
-| Source          | What is checked                                                   |
-| --------------- | ----------------------------------------------------------------- |
+| Source                  | What is checked                                                   |
+| ----------------------- | ----------------------------------------------------------------- |
+| `checks:` (config.yaml) | Declared test/typecheck/lint commands actually pass — execution evidence, not document review. Skipped entirely if unconfigured. |
 | `spec.md`       | FRs and SCs addressed by the phase are implemented and testable   |
 | `analysis.md`   | CRITICAL/HIGH findings for the phase are resolved or deferred     |
 | `principles.md` | No MUST/MUST NOT statements are violated                          |
 
-CRITICAL analysis findings and principles violations **block progress**. HIGH findings must be resolved or explicitly deferred with a reason.
+A failing required check **blocks before** the `wspec-phase-validator` subagent is dispatched —
+reviewing a diff that doesn't build or pass its own tests wastes the pass. CRITICAL analysis
+findings and principles violations also **block progress**. HIGH findings must be resolved or
+explicitly deferred with a reason.
 
 The adversarial attack pass (Phase 4.55 of `/wspec-propose`, run by `wspec-analyst`) produces `Adversarial/Boundary` category findings in `analysis.md`. CRITICAL/HIGH findings from that pass block `/wspec-implement` and the git pre-push hook until resolved or overridden.
+
+`wspec.computeCoverage` deterministically matches `spec.md` FR-NNN/SC-NNN requirements against
+`tasks.md` tasks tagged `[FR-NNN]`/`[SC-NNN]`, and whether a matching task also carries a
+`[unit]`/`[intg]`/`[e2e]` test-level tag. `wspec-analyst` consumes this as authoritative input
+rather than re-deriving it, so a requirement with a task but no test surfaces as a `Coverage Gap`
+finding without spending an opus reasoning pass to find it.
+
+---
+
+## Ticket Mirror
+
+When a change packet is linked to a GitHub/GitLab issue (`metadata.yaml`'s `issue:`, set by
+`wspec.bindTicket`), wSpec keeps that ticket's description re-rendered from live packet state -
+phase checklist, the `/wspec-propose` clarification Q&A, open findings, checks, running spend,
+dates - and posts short comments on meaningful events (packet created, implementation started,
+phase complete, a new CRITICAL/HIGH finding, archived). The ticket is a *projection*, never an
+input: `metadata.yaml`/`state.json` stay authoritative, and a failed sync (offline, no CLI,
+unauthed) just logs a warning and self-heals on the next successful one - no queue, no
+reconciliation logic.
+
+- **Fully automatic.** Mirroring is folded into the tools that already mutate state
+  (`wspec.setStatus`, `wspec.markTask`, `wspec.validatePhase`, `wspec.appendFindings`,
+  `wspec.archive`) - never a separate step to remember, never an extra permission prompt.
+- **A human-written `/wspec-capture` body is never overwritten.** The rendered dashboard lives in
+  a sentinel-delimited region (`<!-- wspec:begin -->...<!-- wspec:end -->`) spliced into whatever
+  the issue body already contains.
+- **Inert with no linked ticket** - a change nobody bound to an issue costs zero forge calls.
+- **Capability-aware.** GitLab issues get a real due date (derived from `estimated_effort`) and a
+  milestone (defaulting to `capability`); GitHub issues get the milestone only (no due-date field
+  on GitHub issues) plus native sub-issue/dependency support where the installed `gh` version
+  supports it. Detected once via `wspec.forgeCaps`, cached, and re-probed if a feature turns out
+  to be tier-gated (e.g. GitLab Premium-only dependencies).
+- **Bind a ticket** with `wspec.bindTicket` (`{ "id": "<CHANGE_ID>", "number": <n> }` to attach an
+  existing issue, or `{ "id": "<CHANGE_ID>", "create": true }` to open one). `/wspec-propose` does
+  this automatically per `ticket.create_on_propose` (see Configuration below).
+- **Force a re-render** with `wspec.syncTicket` (`{ "id": "<CHANGE_ID>" }`) if a ticket ever looks
+  stale - it's idempotent (a byte-identical render is a no-op) and safe to run any time.
+- **Verify offline** with `wspec.syncTicket { "dryRun": true }` - renders the body/comments and
+  returns them as data, making zero `gh`/`glab` calls. Works with no CLI installed and no auth.
+
+See the `ticket:` block in Configuration for the full set of controls, and
+`wspec/mcp/src/lib/ticket.ts` / `ticketRender.ts` for the implementation (I/O and pure rendering
+are deliberately split so the render half is fully unit-testable offline).
 
 ---
 
@@ -188,7 +239,7 @@ wSpec installs four git hook shims (POSIX sh → Node):
 | Hook | Behaviour |
 | ---- | --------- |
 | `pre-commit` | Blocks on unresolved CRITICAL findings for the active change |
-| `pre-push` | Blocks on unresolved CRITICAL/HIGH findings; warns on status/state drift |
+| `pre-push` | Blocks on unresolved CRITICAL/HIGH findings and on a recorded failing required check (`checks:` in config.yaml, if configured); warns on status/state drift and on a change that has never run `wspec.runChecks` |
 | `commit-msg` | Validates commit message format |
 | `prepare-commit-msg` | Prepares commit message scaffolding |
 
@@ -238,6 +289,13 @@ capture_label: wspec          # label applied to /wspec-capture issues; default 
 implement_phase_commits: ask  # ask | auto
 override_ttl_days: 14
 
+# Optional: execution-evidence gate (wspec.runChecks). Declared, not inferred, so this stays
+# language-agnostic. Absent/empty = feature off, no behavior change.
+# checks:
+#   test: "npm run test"
+#   typecheck: "npm run check"
+#   required: [test]
+
 # Optional: project context for AI artifact generation
 # context: |
 #   Tech stack: TypeScript, Node.js
@@ -247,6 +305,20 @@ override_ttl_days: 14
 # rules:
 #   proposal:
 #     - Keep proposals under 300 words
+
+# Optional: ticket mirror (see the Ticket Mirror section above). Commented out on purpose -
+# install/upgrade never rewrites this file, so absence must mean these exact defaults.
+# ticket:
+#   enabled: true
+#   create_on_propose: ask          # ask | always | never
+#   sync_on: phase                  # transition | phase | task
+#   events: [packet_created, implementation_started, phase_complete, finding_critical, archived]
+#   comment_findings_at: CRITICAL   # CRITICAL | HIGH | never
+#   show_spend: true
+#   milestone: capability           # capability | none | "<fixed title>"
+#   due_from_effort: true
+#   close_on_finalize: true
+#   timeout_ms: 15000
 ```
 
 ### `.mcp.json` and `.claude/settings.json`
@@ -331,7 +403,7 @@ is an internal effort signal, not precise billing.
 
 ## MCP Tool Reference
 
-The MCP server exposes 27 tools, callable from Claude Code or directly via the CLI:
+The MCP server exposes 32 tools, callable from Claude Code or directly via the CLI:
 
 ```bash
 node wspec/mcp/dist/cli.js list-tools
@@ -348,6 +420,8 @@ Key tools:
 | `wspec.loadChange` | Load full change context for implementation |
 | `wspec.createFeatureBranch` | Compute and create `feat/NNN-name` |
 | `wspec.validatePhase` | Run deterministic phase validation gate |
+| `wspec.runChecks` | Run declared test/typecheck/lint commands for a change; returns a truncated pass/fail digest, never raw output |
+| `wspec.computeCoverage` | Deterministically match spec.md FR-NNN/SC-NNN requirements to tagged tasks and their test-level tags |
 | `wspec.markTask` | Mark a task done in `tasks.md` |
 | `wspec.setStatus` | Update change status in `metadata.yaml` |
 | `wspec.syncSpec` | Diff/apply delta specs to capability library |
@@ -367,6 +441,9 @@ Key tools:
 | `wspec.updateIssue` | Amend a tracker issue's body/title in place (merges follow-up capture detail) |
 | `wspec.closeIssue` | Close a tracker issue, optionally with a closing comment |
 | `wspec.usageReport` | Report token usage and equivalent API cost for a change, or an aggregate across active + finalized changes |
+| `wspec.forgeCaps` | Read-only capability probe for the linked forge (CLI presence, auth, due dates/milestones/sub-issues/dependencies support) |
+| `wspec.syncTicket` | Re-render the linked ticket's body from current state and post one event comment if due; `dryRun` renders with zero forge calls |
+| `wspec.bindTicket` | Link a change to an existing or newly created ticket; writes `issue`/`milestone`/`due_date` into `metadata.yaml` |
 
 ---
 

@@ -7,6 +7,14 @@ wspec/.state.*.tmp
 # records are wspec/changes/<id>/usage.json and wspec/usage-log.jsonl, both committed.
 wspec/usage-cursor.json
 
+# Ticket-mirror receipt + prelude cache (body_hash, posted event dedup) — machine-local
+# bookkeeping, not evidence; the durable link lives in metadata.yaml's issue:/issue_url:.
+wspec/changes/*/.ticket/
+wspec/archive/*/.ticket/
+
+# Forge capability probe cache (CLI presence/auth/feature discovery) — re-probed as needed.
+wspec/.cache/
+
 # memsearch tool cache
 .memsearch/
 

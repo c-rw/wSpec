@@ -8,9 +8,11 @@ import {
   loadChangeContext,
   parseAnalysisBlock
 } from "./changes.js";
+import { readLatestChecks } from "./checks.js";
+import { isTicketInSync, readTicketReceipt } from "./ticket.js";
 import { loadUsageLedger, rollupForState, type TokenTotals } from "./usage.js";
 
-export const STATE_SCHEMA_VERSION = "1.0";
+export const STATE_SCHEMA_VERSION = "1.1";
 const LOCK_STALE_MS = 5000;
 const LOCK_MAX_ATTEMPTS = 2;
 
@@ -31,6 +33,14 @@ interface StatePhase {
   complete: boolean;
 }
 
+interface StateActiveChangeTicket {
+  number: number;
+  url: string | null;
+  forge: string | null;
+  synced_at: string | null;
+  in_sync: boolean;
+}
+
 interface StateActiveChange {
   id: string;
   title: string | null;
@@ -44,6 +54,8 @@ interface StateActiveChange {
   unresolved_finding_ids: string[];
   blocking_finding_ids: string[];
   usage: { tokens: TokenTotals; cost_usd: number } | null;
+  checks: { status: string; completed_at: string; failed: string[] } | null;
+  ticket: StateActiveChangeTicket | null;
 }
 
 interface StateArchivedChange {
@@ -153,6 +165,31 @@ export function rebuildState(repoRoot: string): WspecState {
     const usageLedger = loadUsageLedger(repoRoot, summary.id);
     const usage = usageLedger.segments.length > 0 ? rollupForState(usageLedger) : null;
 
+    // Read-only: the last persisted wspec.runChecks report, if any. Never re-runs commands here
+    // — rebuildState must stay cheap and side-effect-free.
+    const lastChecks = readLatestChecks(repoRoot, summary.id);
+    const checks = lastChecks
+      ? {
+          status: lastChecks.status,
+          completed_at: lastChecks.completed_at,
+          failed: lastChecks.checks.filter((c) => c.status !== "pass").map((c) => c.name)
+        }
+      : null;
+
+    // Read-only receipt lookup, no process spawn — never call syncTicket here, rebuildState must
+    // stay side-effect-free.
+    const ticketReceipt = readTicketReceipt(summary.path);
+    const ticket =
+      ticketReceipt && ticketReceipt.issue
+        ? {
+            number: ticketReceipt.issue,
+            url: ticketReceipt.url,
+            forge: ticketReceipt.forge,
+            synced_at: ticketReceipt.last_synced_at,
+            in_sync: isTicketInSync(repoRoot, summary.id)
+          }
+        : null;
+
     return {
       id: ctx.id,
       title: ctx.title ?? null,
@@ -165,7 +202,9 @@ export function rebuildState(repoRoot: string): WspecState {
       pending_task_ids: ctx.next_phase ? ctx.next_phase.pending_tasks.map((task) => task.id) : [],
       unresolved_finding_ids: unresolved.map((finding) => finding.id),
       blocking_finding_ids: blocking.map((finding) => finding.id),
-      usage
+      usage,
+      checks,
+      ticket
     };
   });
 
@@ -360,10 +399,12 @@ export function formatStateBanner(repoRoot: string): string {
       : `${change.tasks.done}/${change.tasks.total} tasks`;
     const blockers = change.blocking_finding_ids.length;
     const blockerNote = blockers > 0 ? ` · ${blockers} blocking finding(s)` : "";
-    // change.usage is absent on a state.json committed before usage tracking existed — guard.
+    // change.usage/checks are absent on a state.json committed before those fields existed — guard.
     const cost = change.usage?.cost_usd;
     const costNote = cost && cost > 0 ? ` · ~$${cost.toFixed(2)}` : "";
-    return `wspec: ${change.id} · ${change.status ?? "?"} · ${progress}${blockerNote}${costNote}`;
+    const checksNote = change.checks?.status === "fail" ? ` · ✗ checks (${change.checks.failed.join(", ")})` : "";
+    const ticketNote = change.ticket ? ` · #${change.ticket.number}` : "";
+    return `wspec: ${change.id} · ${change.status ?? "?"} · ${progress}${blockerNote}${costNote}${checksNote}${ticketNote}`;
   }
   return `wspec: ${active.length} active changes (${active.map((change) => change.id).join(", ")})`;
 }

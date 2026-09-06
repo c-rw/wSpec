@@ -19,10 +19,10 @@ If `$ARGUMENTS` is non-empty, ground everything that follows in it before doing 
 1. **Explore & Research** — understand the idea, scan the codebase, gather prior art and external references
 2. **Clarify** — ask 3-5 high-impact questions, one at a time
 3. **Branch** — compute and create `feat/NNN-name`, confirm with user
-4. **Generate** — write all change artifacts in one pass (including `research.md`), then
-   **red-team** the spec for boundary/edge cases before any code (Phase 4.55)
-5. **Commit prompt** — offer to commit the packet, then link the branch back to the
-   source issue if one was used
+4. **Generate** — write all change artifacts in one pass (including `research.md`), bind
+   the linked/created ticket (4.1b), then **red-team** the spec for boundary/edge cases
+   before any code (Phase 4.55)
+5. **Commit prompt** — offer to commit the packet
 
 ---
 
@@ -44,6 +44,20 @@ below in place of "the original user description" / `$ARGUMENTS`.
    - One or more → **AskUserQuestion** offering each issue title plus a "Describe a new
      idea" option. Picking an issue resolves exactly like case 1 (`wspec.getIssue`,
      set both vars); picking "new idea" asks directly and leaves `<ISSUE_NUMBER>` unset.
+
+### 0.5 Ticket-mirror gate
+
+Read the optional `ticket:` block in `wspec/config.yaml` for `create_on_propose`
+(default `ask` if the block is absent or the key is unset).
+
+- **`<ISSUE_NUMBER>` is already set** (case 1/3 above) → the ticket is already known;
+  set `<CREATE_TICKET>` = false. It gets bound in Phase 4.1b.
+- **`<ISSUE_NUMBER>` unset, `create_on_propose: never`** → `<CREATE_TICKET>` = false.
+  This change stays untracked, same as today.
+- **`<ISSUE_NUMBER>` unset, `create_on_propose: always`** → `<CREATE_TICKET>` = true.
+- **`<ISSUE_NUMBER>` unset, `create_on_propose: ask`** (default) → **AskUserQuestion**:
+  "Also track this as a tracker issue?" Options: "Yes — create a ticket", "No — local
+  packet only". Set `<CREATE_TICKET>` from the answer.
 
 ---
 
@@ -193,10 +207,25 @@ Copy `wspec/templates/metadata-template.yaml`, fill:
 - `status`: `"drafting"`
 - `branch`: full branch name
 - `capability`: domain name if identifiable (e.g., `auth`, `payments`, `search`); leave empty if unclear
-- `issue`: `<ISSUE_NUMBER>` from Phase 0 if set, else leave empty. Written as a quoted
-  string (`issue: "42"`, matching the template's scalar convention) — `/wspec-finalize`
-  reads it and parses it as an integer before calling `wspec.closeIssue`.
+- `issue`, `issue_url`, `issue_forge`, `milestone`, `due_date`: leave all empty here —
+  filled by `wspec.bindTicket` in Phase 4.1b, never hand-typed.
 - `created` / `updated`: today's date in ISO format
+
+### 4.1b Bind the ticket
+
+Skip this step entirely if `<ISSUE_NUMBER>` is unset and `<CREATE_TICKET>` is false
+(Phase 0.5) — the change stays untracked, exactly like today.
+
+- **`<ISSUE_NUMBER>` is set** → call MCP tool `wspec.bindTicket` with
+  `{ "id": "<CHANGE_ID>", "number": <ISSUE_NUMBER> }`.
+- **`<CREATE_TICKET>` is true** → call MCP tool `wspec.bindTicket` with
+  `{ "id": "<CHANGE_ID>", "create": true, "title": "<Human Readable Title>", "body": "<one-paragraph summary of the idea>", "labels": ["<capture_label>"] }`.
+
+Either way, this writes `issue`/`issue_url`/`issue_forge` (and `milestone`/`due_date`
+where the forge supports them) into `metadata.yaml`, and posts an early
+`packet_created` comment. If it returns `skipped: true` (no forge CLI, not authed,
+etc.), surface the `reason` as a one-line note and continue — a missing ticket link
+must never block packet generation.
 
 ### 4.2 `proposal.md`
 
@@ -251,15 +280,27 @@ Fill (see `wspec/templates/tasks-template.md` if uncertain):
 - Every phase ends with a Validation Checkpoint (pre-written in the template)
 - After listing all tasks, add a rough effort comment at the top of each phase:
   `<!-- Phase estimate: ~N hours -->`
+- Sum every phase's `<!-- Phase estimate: ~N hours -->` comment into a single rough
+  total (round to the nearest half-day for anything over ~4 hours) and write it to
+  `metadata.yaml`'s `estimated_effort` field, e.g. `"~3 days"` — this is what
+  `wspec.bindTicket`/`wspec.syncTicket` use to derive a due date, and it was
+  previously left blank by every change packet.
 
 ### 4.55 Adversarial Analysis → `analysis.md`
+
+First, run MCP tool `wspec.computeCoverage` with `{ "id": "<CHANGE_ID>" }`. It deterministically
+matches `spec.md`'s FR-NNN/SC-NNN requirements against `tasks.md` tasks tagged `[FR-NNN]`/
+`[SC-NNN]`, and notes whether a matching task also carries a `[unit]`/`[intg]`/`[e2e]` tag — pure
+string matching, not judgment. This is string-matching work an opus subagent should not have to
+re-derive by reading every artifact.
 
 Delegate a single pass to the `wspec-analyst` subagent (model: opus, the strongest available,
 since a weak model here produces false confidence) so the main context stays lean; its own
 definition already carries the attack techniques, detection passes, severity/scoping rules, and
 output structure, so do not restate them here. It first adversarially attacks the not-yet-
 implemented spec so edge cases surface before any code is generated, then runs the cross-artifact
-scan — its reasoning must NOT pollute the main context. Dispatch it with the paths:
+scan — its reasoning must NOT pollute the main context. Dispatch it with the paths and the
+precomputed coverage result:
 
 > "Read-only adversarial and cross-artifact analysis for change `<CHANGE_ID>`. Paths:
 > - wspec/changes/<CHANGE_ID>/research.md
@@ -267,7 +308,10 @@ scan — its reasoning must NOT pollute the main context. Dispatch it with the p
 > - wspec/changes/<CHANGE_ID>/spec.md
 > - wspec/changes/<CHANGE_ID>/design.md
 > - wspec/changes/<CHANGE_ID>/tasks.md
-> - wspec/principles.md"
+> - wspec/principles.md
+>
+> Precomputed coverage (from wspec.computeCoverage, authoritative — do not re-derive):
+> <paste the `gaps` array from wspec.computeCoverage>"
 
 Then, in the main agent (do **not** re-summarize or argue with the payload):
 
@@ -284,6 +328,12 @@ machine-readable YAML block is schema-valid (categories, id pattern, required fi
 is `false`, feed the `issues[]` back to the analyst subagent for one correction pass before
 proceeding — do not hand-patch the YAML yourself, since that risks drifting the Findings table
 out of sync with it.
+
+If the ticket was bound (Phase 4.1b), call `wspec.syncTicket` with
+`{ "id": "<CHANGE_ID>", "event": "packet_created" }`. All artifacts and the findings
+table now exist, so this is the first *complete* body render; the `packet_created`
+event was already posted in 4.1b so this call re-renders the body only and posts no
+second comment (`comments_skipped` will list it — that's expected, not an error).
 
 ---
 
@@ -311,17 +361,6 @@ git add wspec/changes/<CHANGE_ID>/
 git commit -m "feat(<CHANGE_ID>): add change packet"
 ```
 
-### 5.1 Link back to the source issue
-
-If `<ISSUE_NUMBER>` is set (Phase 0), call MCP tool `wspec.commentIssue` with:
-```
-{ "number": <ISSUE_NUMBER>, "body": "Proposed as `<CHANGE_ID>` on branch `<BRANCH_NAME>` — packet at wspec/changes/<CHANGE_ID>/." }
-```
-This runs regardless of whether the user chose to commit the packet — the branch already
-exists at this point (Phase 3.3), so the issue comment is accurate either way. If the
-comment call fails (e.g. `gh`/`glab` not authed), surface the error but do not block the
-rest of the output — the change packet itself is already complete.
-
 ---
 
 ## Output
@@ -334,7 +373,7 @@ After completing all phases, show:
 **Change**: <CHANGE_ID>
 **Branch**: feat/<CHANGE_ID>
 **Packet**: wspec/changes/<CHANGE_ID>/
-**Source issue**: <#ISSUE_NUMBER (linked) | none>
+**Ticket**: <#N (created | linked) — url | none>
 
 Artifacts created:
   research.md   — prior art, references, risks, recommendation

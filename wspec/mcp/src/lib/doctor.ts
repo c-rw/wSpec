@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { listChangeSummaries } from "./changes.js";
+import { readChecksConfig, readLatestChecks } from "./checks.js";
+import { getForgeCaps } from "./forgeCaps.js";
 import { runCommand } from "./shell.js";
 import { maxMtimeMs, verifyState } from "./state.js";
 import { validateAnalysisFile } from "./validate.js";
@@ -82,6 +84,15 @@ export function runDoctor(repoRoot: string): DoctorReport {
       : "core.hooksPath not set; run install.ps1/install.sh, or hooks are intentionally disabled"
   });
 
+  const caps = getForgeCaps(repoRoot);
+  checks.push({
+    name: "forge capabilities (ticket mirror)",
+    status: !caps.forge ? "warn" : !caps.available || !caps.authed ? "warn" : "ok",
+    detail: !caps.forge
+      ? (caps.reason ?? "could not determine forge")
+      : `${caps.forge} via ${caps.cli} (${caps.confidence})${caps.cli_version ? ` — ${caps.cli_version}` : ""}${caps.reason ? ` — ${caps.reason}` : ""}`
+  });
+
   const stateVerify = verifyState(repoRoot);
   checks.push({
     name: "state.json sync",
@@ -97,6 +108,20 @@ export function runDoctor(repoRoot: string): DoctorReport {
       name: "principles lock",
       status: lockFresh ? "ok" : "warn",
       detail: lockFresh ? "wspec/principles.lock.json is fresh" : "principles.lock.json missing or stale; run wspec.lockPrinciples"
+    });
+  }
+
+  const checksConfig = readChecksConfig(repoRoot);
+  if (checksConfig) {
+    const { changes: activeForChecks } = listChangeSummaries(repoRoot, undefined, false);
+    const neverRun = activeForChecks.filter((change) => !readLatestChecks(repoRoot, change.id));
+    checks.push({
+      name: "checks: execution evidence",
+      status: neverRun.length === 0 ? "ok" : "warn",
+      detail:
+        neverRun.length === 0
+          ? `${Object.keys(checksConfig.commands).length} command(s) declared (${Object.keys(checksConfig.commands).join(", ")})`
+          : `${neverRun.length} active change(s) have never run wspec.runChecks: ${neverRun.map((c) => c.id).join(", ")}`
     });
   }
 

@@ -363,6 +363,30 @@ export function rollupForState(ledger: UsageLedger): { tokens: TokenTotals; cost
   return { tokens, cost_usd };
 }
 
+export interface CommandUsageBreakdown {
+  tokens: TokenTotals;
+  cost_usd: number;
+  count: number;
+}
+
+/**
+ * Per-command rollup (propose/research/implement/finalize), extracted so wspec.usageReport and
+ * the ticket-mirror's Spend section compute the exact same numbers from the exact same fold —
+ * two independent inline copies of this loop would be free to drift apart over time.
+ */
+export function rollupByCommand(ledger: UsageLedger): Record<string, CommandUsageBreakdown> {
+  const byCommand: Record<string, CommandUsageBreakdown> = {};
+  for (const segment of ledger.segments) {
+    const existing = byCommand[segment.command] ?? { tokens: emptyTotals(), cost_usd: 0, count: 0 };
+    byCommand[segment.command] = {
+      tokens: addTotals(existing.tokens, segment.tokens),
+      cost_usd: existing.cost_usd + segment.cost_usd,
+      count: existing.count + 1
+    };
+  }
+  return byCommand;
+}
+
 function usageLogPath(repoRoot: string): string {
   return path.join(repoRoot, "wspec", "usage-log.jsonl");
 }
