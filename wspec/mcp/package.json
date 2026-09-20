@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bundle": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --banner:js=\"import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);\" --outfile=dist/cli.js",
+    "build": "npm run typecheck && npm run bundle",
     "start": "node dist/cli.js serve"
   },
   "dependencies": {
@@ -13,6 +15,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.19",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.3"
   }
 }

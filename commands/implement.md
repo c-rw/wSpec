@@ -1,3 +1,11 @@
+---
+description: Execute tasks.md phase by phase with the four-layer validation gate
+argument-hint: [change-id]
+model: inherit
+effort: high
+allowed-tools: Read, Write, Edit, Bash, Task, AskUserQuestion, ExitPlanMode, mcp__plugin_wspec_wspec
+---
+
 # wSpec Implement
 
 ## User Input
@@ -5,6 +13,9 @@
 ```text
 $ARGUMENTS
 ```
+
+> **Preflight**: if `wspec/config.yaml` does not exist in this project, wSpec has not been set up
+> here. Stop and tell the user to run `/wspec:setup` first — do not try to create it yourself.
 
 ---
 

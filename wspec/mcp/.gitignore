@@ -1,3 +1,8 @@
 node_modules/
-dist/
 *.tsbuildinfo
+
+# dist/cli.js is the esbuild bundle the plugin actually runs (hooks, git shims, and
+# the MCP server all point at it). It's committed because Claude Code never runs `npm install`
+# for a plugin, so a fresh clone would otherwise have no server. Rebuild with `npm run build`.
+dist/*
+!dist/cli.js

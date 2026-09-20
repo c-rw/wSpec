@@ -1,0 +1,16 @@
+{
+  "name": "wspec",
+  "owner": {
+    "name": "Chris Worth"
+  },
+  "metadata": {
+    "description": "wSpec: a spec-driven change workflow for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "wspec",
+      "source": "./",
+      "description": "Spec-driven change workflow: propose, implement, and finalize changes with structured specs, adversarial quality gates, and per-phase validation."
+    }
+  ]
+}

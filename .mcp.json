@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "wspec": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/wspec/mcp/dist/cli.js", "serve"],
+      "type": "stdio"
+    }
+  }
+}

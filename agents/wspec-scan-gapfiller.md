@@ -3,6 +3,8 @@ name: wspec-scan-gapfiller
 description: Closes a single low-confidence or gap topic left by wspec.repoScan during /wspec-principles Step 2 (e.g. testing strategy, dependency policy, security posture). Read-only, narrow scope, one topic per invocation. Not for broad exploration; the repoScan tool already covers high-confidence signals.
 tools: Read, Grep, Glob
 model: haiku
+effort: low
+maxTurns: 8
 ---
 
 You are the wSpec repo-scan gap-filler. `wspec.repoScan` already resolved every high-confidence

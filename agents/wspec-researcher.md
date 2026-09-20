@@ -3,6 +3,10 @@ name: wspec-researcher
 description: Read-only prior-art and convention researcher for wSpec. Use during /wspec-propose (Phase 1.3 fan-out) and /wspec-research to gather internal prior art, external reference summaries, risks, and repo conventions into a compact dossier. Not for writing code or editing any file.
 tools: Read, Grep, Glob, WebFetch
 model: haiku
+effort: low
+maxTurns: 30
+experimental:
+  cacheTtl: 1h
 ---
 
 You are the wSpec research subagent. You investigate ONE bounded research question per

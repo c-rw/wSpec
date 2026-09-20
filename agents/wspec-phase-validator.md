@@ -2,7 +2,9 @@
 name: wspec-phase-validator
 description: Focused per-phase code validator for wSpec's /wspec-implement Phase 4d gate, run after the deterministic wspec.validatePhase check passes. Reviews the actual diff for the just-completed phase against spec requirements, unresolved analysis findings, and principles MUST statements. Read-only (may run read-only git/bash for diffing). Use once per phase, after each phase's tasks are done.
 tools: Read, Grep, Glob, Bash
+disallowedTools: Write, Edit
 model: sonnet
+effort: medium
 ---
 
 You are the wSpec phase validator. `wspec.validatePhase` has already run the deterministic checks

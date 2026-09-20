@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { assertChangeBranch, readYamlScalars, resolveChangeDir, upsertMetadataScalars } from "./changes.js";
+import { assertChangeBranch, getCurrentBranch, readYamlScalars, resolveChangeDir, upsertMetadataScalars } from "./changes.js";
 import { forgeCli, resolveForge, vcsReady, type Forge } from "./forge.js";
 import { runCommand } from "./shell.js";
 import { appendUsageLogLine, loadUsageLedgerFromDir, rollupLedger } from "./usage.js";
@@ -264,8 +264,7 @@ export function postArchiveAction(
   } else if (resolved?.archived) {
     const archivedMetadata = readYamlScalars(path.join(resolved.dir, "metadata.yaml"));
     const expectedBranch = archivedMetadata.branch?.trim();
-    const branchRes = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
-    const currentBranch = branchRes.code === 0 ? branchRes.stdout.trim() : null;
+    const currentBranch = getCurrentBranch(repoRoot);
     if (expectedBranch && currentBranch && currentBranch !== expectedBranch) {
       throw new Error(
         `Refusing to run post-archive action for change '${id}' on branch '${currentBranch}'. Expected branch '${expectedBranch}'. Switch to the change branch and retry.`
@@ -274,12 +273,10 @@ export function postArchiveAction(
   }
 
   const resolvedAction = resolvePostArchiveAction(repoRoot, action);
-  const branchRes = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
-  if (branchRes.code !== 0) {
-    throw new Error(`Unable to resolve current branch: ${branchRes.stderr || branchRes.stdout}`);
+  const branch = getCurrentBranch(repoRoot);
+  if (!branch) {
+    throw new Error("Unable to resolve current branch (is this a git repository?)");
   }
-
-  const branch = branchRes.stdout.trim();
   const resolvedTitle = resolveChangeTitle(repoRoot, id, title);
 
   const result: {

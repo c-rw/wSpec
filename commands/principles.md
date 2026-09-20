@@ -1,3 +1,11 @@
+---
+description: Create or refresh wspec/principles.md from a repo scan and an adaptive questionnaire
+argument-hint: [intent, e.g. "greenfield" or "migrate legacy"]
+model: inherit
+effort: high
+allowed-tools: Read, Write, Task, AskUserQuestion, mcp__plugin_wspec_wspec
+---
+
 # wSpec Principles
 
 ## User Input
@@ -5,6 +13,9 @@
 ```text
 $ARGUMENTS
 ```
+
+> **Preflight**: if `wspec/config.yaml` does not exist in this project, wSpec has not been set up
+> here. Stop and tell the user to run `/wspec:setup` first — do not try to create it yourself.
 
 If `$ARGUMENTS` includes intent (for example "greenfield" or "migrate legacy"), treat it as extra context.
 

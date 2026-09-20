@@ -1,3 +1,11 @@
+---
+description: Create a full change packet (research, spec, design, tasks, adversarial analysis) from an idea or tracked issue
+argument-hint: <idea | #issue>
+model: inherit
+effort: high
+allowed-tools: Read, Write, Bash, Task, Workflow, AskUserQuestion, mcp__plugin_wspec_wspec
+---
+
 # wSpec Propose
 
 ## User Input
@@ -5,6 +13,9 @@
 ```text
 $ARGUMENTS
 ```
+
+> **Preflight**: if `wspec/config.yaml` does not exist in this project, wSpec has not been set up
+> here. Stop and tell the user to run `/wspec:setup` first — do not try to create it yourself.
 
 If `$ARGUMENTS` is non-empty, ground everything that follows in it before doing anything else.
 
@@ -91,9 +102,32 @@ set `<REFERENCE_URLS>` to empty.
 
 ### 1.3 Delegate research fan-out
 
-**Do not** scan `wspec/specs/` or the source tree from this agent directly. Dispatch the
-`wspec-researcher` subagent (model: haiku) in parallel, once per angle below, covering the
-full research surface, then merge their briefs into a single research dossier:
+**Do not** scan `wspec/specs/` or the source tree from this agent directly, and do not dispatch
+`wspec-researcher` one angle at a time yourself — merging three-to-four independent angles into
+one dossier is a genuine barrier (there's no per-angle multi-stage chain, just N single-shot
+agents whose combined output is one document), which is exactly what the Workflow tool is for.
+
+If the **Workflow** tool is available in this session, run the saved workflow
+`wspec:wspec-research-fanout` with:
+
+```json
+{
+  "idea": "<restate idea>",
+  "repoScanSummary": <the wspec.repoScan result from 1.1>,
+  "gaps": <repoScanSummary.gaps, or []>,
+  "referenceUrls": <REFERENCE_URLS, or []>
+}
+```
+
+It fans out `wspec-researcher` (model: haiku) across the fixed angles (internal prior art;
+risks/constraints/edge cases; testing and conventions; external references, only when
+`referenceUrls` is non-empty) in parallel and returns `{ dossier, angleCount, failedCount }`. If
+`failedCount > 0`, the dossier still has an entry per angle — a failed one reads as a plain
+`_(angle: no result...)_` placeholder rather than corrupting the merge; note the gap rather than
+re-running the whole workflow for one angle.
+
+**If the Workflow tool is unavailable** (older Claude Code, or dynamic workflows turned off),
+fall back to dispatching `wspec-researcher` yourself, in parallel, once per angle:
 
 1. Internal prior art
   > "Read-only research for a new wSpec change. The user wants: <restate idea>.
@@ -112,10 +146,9 @@ full research surface, then merge their briefs into a single research dossier:
 If `<REFERENCE_URLS>` is non-empty, also fetch and summarize each URL — do not browse
 arbitrary sites beyond what the user provided.
 
-Pass the `wspec.repoScan` summary and any `gaps[]` into each subagent prompt (so
-subagents focus on unresolved evidence, not solved signals) and treat `repoScan` as
-baseline truth for repo-level signals — unresolved `gaps[]` become Phase 2 clarification
-candidates.
+Either way, pass the `wspec.repoScan` summary and any `gaps[]` into the research (so it
+focuses on unresolved evidence, not solved signals) and treat `repoScan` as baseline truth for
+repo-level signals — unresolved `gaps[]` become Phase 2 clarification candidates.
 
 Use the merged brief as your thinking input AND as the source for `research.md` in
 Phase 4.0. ASCII diagrams are still welcome in your response to the user.

@@ -18,6 +18,7 @@ import { getForgeCaps } from "./forgeCaps.js";
 import { closeIssue, commentIssue, createIssue, ensureLabel, getIssue, listIssues, updateIssue } from "./issues.js";
 import { findRepoRoot } from "./root.js";
 import { repoScan } from "./scan.js";
+import { runSetup } from "./setup.js";
 import { loadState, verifyState, writeState, writeStateBestEffort } from "./state.js";
 import { bindTicket, readTicketConfig, syncTicket, syncTicketBestEffort } from "./ticket.js";
 import { validateAll } from "./validateAll.js";
@@ -35,6 +36,14 @@ import {
 } from "./usage.js";
 
 const emptySchema = z.object({}).strict().optional();
+
+const setupSchema = z
+  .object({
+    apply: z.boolean().optional(),
+    hooks: z.boolean().optional(),
+    settings: z.boolean().optional()
+  })
+  .strict();
 
 const gateCheckSchema = z.object({
   gate: z.enum(["pre-commit", "pre-push", "manual"]),
@@ -667,6 +676,24 @@ export const toolDefinitions = [
     run: (_args: unknown) => {
       const repoRoot = findRepoRoot();
       return runDoctor(repoRoot);
+    }
+  },
+  {
+    name: "wspec.setup",
+    description:
+      "Install or refresh the project-side wSpec files a plugin cannot ship: templates and schemas, git hook shims and core.hooksPath, .gitignore entries, read-only permissions in .claude/settings.json, and seed config/principles files. Preview by default (writes nothing); pass apply:true to write. hooks:false skips git hook wiring, settings:false skips .claude/settings.json. Idempotent, and safe to re-run after a plugin update.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        apply: { type: "boolean" },
+        hooks: { type: "boolean" },
+        settings: { type: "boolean" }
+      },
+      additionalProperties: false
+    },
+    run: (args: unknown) => {
+      const input = setupSchema.parse(args ?? {});
+      return runSetup({ apply: input.apply ?? false, hooks: input.hooks, settings: input.settings });
     }
   },
   {

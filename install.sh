@@ -3,19 +3,27 @@ set -euo pipefail
 
 # Install or upgrade wSpec into another local repository.
 #
-# Mirrors wSpec framework files from this repo into --folder (defaults to the
-# current directory): additions and updates are copied, and anything that no
-# longer exists in this source is removed from the target's wSpec-owned
-# directories. Project-authored files (config.yaml, principles.md, changes/,
-# specs/, archive/) are seeded only if missing and are never touched by the
-# mirror. .claude/settings.json and anything else under .claude/ that isn't a
-# wSpec-owned wspec-*.md command/agent is left completely alone.
+# As of the plugin repackage, wSpec's commands, agents, hooks, and MCP server
+# are distributed as a Claude Code plugin (see .claude-plugin/plugin.json) and
+# are NOT mirrored by this script — install the plugin separately (marketplace
+# add + /plugin install, or --plugin-dir for local testing).
+#
+# What this script still does, because a plugin cannot ship it:
+#   - wspec/templates, wspec/schemas — read by relative path from command
+#     prompt text and MCP tools, which don't get ${CLAUDE_PLUGIN_ROOT}
+#     substitution the way hook/MCP/agent config does
+#   - wspec/scripts (git hook shims + merge-settings.cjs) — git itself invokes
+#     core.hooksPath directly and has no notion of a Claude Code plugin
+#   - permissions.allow in .claude/settings.json — a plugin's own
+#     settings.json only supports the `agent`/`subagentStatusLine` keys
+#   - git hooksPath configuration, .gitignore entries, and seeding
+#     config.yaml/principles.md/changes//specs//archive/ on first init
 #
 # --upgrade refreshes framework files only; never touches config, principles,
 # changes/, specs/, or archive/.
 #
-# --dry-run previews every add/update/remove without touching the filesystem,
-# running npm, or changing git config.
+# --dry-run previews every add/update/remove without touching the filesystem
+# or changing git config.
 
 FOLDER="."
 UPGRADE=0
@@ -298,21 +306,6 @@ test_git_work_tree() {
 	git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
-invoke_required_command() {
-	local command="$1"
-	local working_dir="$2"
-	local failure_message="$3"
-	shift 3
-
-	(
-		cd "$working_dir"
-		"$command" "$@"
-	) || {
-		echo "$failure_message" >&2
-		exit 1
-	}
-}
-
 step "Source: $src"
 step "Target: $dst"
 mode_suffix=""
@@ -323,76 +316,46 @@ else
 	step "Mode:   init$mode_suffix"
 fi
 
-step 'Claude Code customizations'
-mirror_owned_files "$src/.claude/commands" "$dst/.claude/commands" 'wspec-*.md'
-mirror_owned_files "$src/.claude/agents" "$dst/.claude/agents" 'wspec-*.md'
+step 'Claude Code settings (permissions reference)'
 if [[ -f "$src/.claude/settings.example.json" ]]; then
 	fs_mkdir "$dst/.claude"
 	fs_cp "$src/.claude/settings.example.json" "$dst/.claude/settings.example.json" '.claude/settings.example.json'
 fi
 
-step 'Workflow wrapper commands'
-for wrapper in wspec-propose wspec-research wspec-principles wspec-implement wspec-finalize wspec-propose.cmd wspec-research.cmd wspec-principles.cmd wspec-implement.cmd wspec-finalize.cmd; do
-	fs_cp "$src/$wrapper" "$dst/$wrapper" "$wrapper"
-done
-
-if [[ $DRY_RUN -eq 0 ]]; then
-	for wrapper in wspec-propose wspec-research wspec-principles wspec-implement wspec-finalize; do
-		chmod +x "$dst/$wrapper"
-	done
-	ok 'set executable bit on workflow wrappers'
-else
-	skip 'set executable bit on workflow wrappers (dry-run)'
-fi
-
 step 'wspec/ framework files'
 mirror_tree "$src/wspec/templates" "$dst/wspec/templates"
 mirror_tree "$src/wspec/scripts" "$dst/wspec/scripts"
-mirror_tree "$src/wspec/mcp" "$dst/wspec/mcp" node_modules dist
 mirror_tree "$src/wspec/schemas" "$dst/wspec/schemas"
 fs_cp "$src/wspec/README.md" "$dst/wspec/README.md" 'wspec/README.md'
 
 step 'Remove obsolete files'
 # Only for orphans that live outside every mirrored directory above (e.g. a
-# file that used to sit directly under wspec/). Anything under
-# wspec/templates, wspec/scripts, wspec/mcp, or wspec/schemas is already
-# handled automatically by the mirror passes -- do not duplicate entries here.
+# file that used to sit directly under wspec/, or wspec/mcp from a
+# pre-plugin install this script no longer mirrors). Anything under
+# wspec/templates, wspec/scripts, or wspec/schemas is already handled
+# automatically by the mirror passes -- do not duplicate entries here.
 for obsolete in wspec/constitution.md; do
 	if [[ -f "$dst/$obsolete" ]]; then
 		fs_rm "$dst/$obsolete" "$obsolete"
 	fi
 done
-
-step 'MCP setup (mandatory)'
-mcp_dir="$dst/wspec/mcp"
-if ! command -v node >/dev/null 2>&1; then
-	echo 'Node.js is required for wSpec install. Install Node.js, then rerun install.sh.' >&2
-	exit 1
-fi
-if ! command -v npm >/dev/null 2>&1; then
-	echo 'npm is required for wSpec install. Install npm (bundled with Node.js), then rerun install.sh.' >&2
-	exit 1
+if [[ -d "$dst/wspec/mcp" && $DRY_RUN -eq 0 ]]; then
+	echo '    note: wspec/mcp/ from a pre-plugin install was left in place -- it is no longer used' >&2
+	echo '          (the MCP server now runs from the wspec plugin install) and can be deleted.' >&2
 fi
 
-if [[ $DRY_RUN -eq 1 ]]; then
-	# The directory-existence and build-artifact checks below assume the mirror pass above
-	# actually ran; under --dry-run nothing was written, so skip straight past them.
-	skip 'npm install / npm run build (dry-run)'
-else
-	if [[ ! -d "$mcp_dir" ]]; then
-		echo "Missing required MCP directory: $mcp_dir" >&2
-		exit 1
+# Older installs copied the terminal wrappers into the project, where they need a wspec/mcp that
+# plugin users don't have. They aren't copied any more; point out the dead ones.
+old_wrappers=()
+for wrapper in wspec-propose wspec-research wspec-principles wspec-implement wspec-finalize wspec-propose.cmd wspec-research.cmd wspec-principles.cmd wspec-implement.cmd wspec-finalize.cmd; do
+	if [[ -f "$dst/$wrapper" ]]; then
+		old_wrappers+=("$wrapper")
 	fi
-
-	invoke_required_command npm "$mcp_dir" 'Failed to install MCP dependencies (npm install). Fix the error above and rerun install.sh.' install
-	invoke_required_command npm "$mcp_dir" 'Failed to build MCP CLI (npm run build). Fix the error above and rerun install.sh.' run build
-
-	mcp_cli="$mcp_dir/dist/cli.js"
-	if [[ ! -f "$mcp_cli" ]]; then
-		echo "MCP build completed without required artifact: $mcp_cli" >&2
-		exit 1
-	fi
-	ok 'installed and built wspec/mcp'
+done
+if [[ ${#old_wrappers[@]} -gt 0 && $DRY_RUN -eq 0 ]]; then
+	echo "    note: ${old_wrappers[*]} in the project root came from an older install and no longer work" >&2
+	echo '          here (they need wspec/mcp in the project). Delete them and run the wrappers by path from the' >&2
+	echo '          wSpec plugin directory instead -- see the Terminal CLI section of the README.' >&2
 fi
 
 step 'Git hooks'
@@ -412,6 +375,14 @@ elif [[ $configure_hooks -eq 1 ]]; then
 			fi
 		done
 		ok 'set executable bit on hook shims'
+
+		# The shims resolve wspec/mcp/dist/cli.js relative to their own location, which was
+		# correct under the pre-plugin mirror (wspec/mcp shipped alongside wspec/scripts in the
+		# consumer repo) but breaks now that mcp/ is plugin-owned and never mirrored. So bake the
+		# absolute path to this install's real cli.js in as a plain text file next to the shims,
+		# which they read in preference to the old relative guess.
+		printf '%s\n' "$src/wspec/mcp/dist/cli.js" >"$dst/wspec/scripts/hooks/.wspec-mcp-cli-path"
+		ok 'resolved cli.js path for hook shims'
 	fi
 else
 	if [[ $DRY_RUN -eq 1 ]]; then

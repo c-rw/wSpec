@@ -1,3 +1,11 @@
+---
+description: Refresh research.md for an active change with new prior art, risks, and references
+argument-hint: [change-id]
+model: inherit
+effort: medium
+allowed-tools: Read, Write, WebFetch, Task, AskUserQuestion, mcp__plugin_wspec_wspec
+---
+
 # wSpec Research
 
 ## User Input
@@ -5,6 +13,9 @@
 ```text
 $ARGUMENTS
 ```
+
+> **Preflight**: if `wspec/config.yaml` does not exist in this project, wSpec has not been set up
+> here. Stop and tell the user to run `/wspec:setup` first — do not try to create it yourself.
 
 You **MUST** consider user input before proceeding.
 

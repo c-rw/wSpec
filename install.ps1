@@ -4,19 +4,28 @@
     Install or upgrade wSpec into another local repository.
 
 .DESCRIPTION
-    Mirrors wSpec framework files from this repo into -Folder (defaults to the
-    current directory): additions and updates are copied, and anything that no
-    longer exists in this source is removed from the target's wSpec-owned
-    directories. Project-authored files (config.yaml, principles.md, changes/,
-    specs/, archive/) are seeded only if missing and are never touched by the
-    mirror. `.claude/settings.json` and anything else under `.claude/` that
-    isn't a wSpec-owned `wspec-*.md` command/agent is left completely alone.
+    As of the plugin repackage, wSpec's commands, agents, hooks, and MCP
+    server are distributed as a Claude Code plugin (see
+    .claude-plugin/plugin.json) and are NOT mirrored by this script -- install
+    the plugin separately (marketplace add + /plugin install, or
+    -plugin-dir for local testing).
+
+    What this script still does, because a plugin cannot ship it:
+      - wspec/templates, wspec/schemas -- read by relative path from command
+        prompt text and MCP tools, which don't get ${CLAUDE_PLUGIN_ROOT}
+        substitution the way hook/MCP/agent config does
+      - wspec/scripts (git hook shims + merge-settings.cjs) -- git itself
+        invokes core.hooksPath directly and has no notion of a plugin
+      - permissions.allow in .claude/settings.json -- a plugin's own
+        settings.json only supports `agent`/`subagentStatusLine`
+      - git hooksPath configuration, .gitignore entries, and seeding
+        config.yaml/principles.md/changes//specs//archive/ on first init
 
     -Upgrade refreshes framework files only; never touches config, principles,
     changes/, specs/, or archive/.
 
-    -DryRun previews every add/update/remove without touching the filesystem,
-    running npm, or changing git config.
+    -DryRun previews every add/update/remove without touching the filesystem
+    or changing git config.
 
     Git hooks are configured by default when the target is a git repository.
     Use -NoHooks to skip or remove hook configuration.
@@ -67,30 +76,6 @@ function Test-GitWorkTree {
         return ($LASTEXITCODE -eq 0 -and (($out | Select-Object -First 1).Trim() -eq 'true'))
     } catch {
         return $false
-    }
-}
-
-function Test-CommandAvailable {
-    param([Parameter(Mandatory = $true)][string]$Name)
-    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
-}
-
-function Invoke-RequiredCommand {
-    param(
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string[]]$ArgumentList,
-        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [Parameter(Mandatory = $true)][string]$FailureMessage
-    )
-
-    Push-Location -LiteralPath $WorkingDirectory
-    try {
-        & $FilePath @ArgumentList
-        if ($LASTEXITCODE -ne 0) {
-            throw $FailureMessage
-        }
-    } finally {
-        Pop-Location
     }
 }
 
@@ -248,75 +233,35 @@ Step "Source: $src"
 Step "Target: $dst"
 Step ("Mode:   " + $(if ($Upgrade) { 'upgrade' } else { 'init' }) + $(if ($script:DryRun) { ' (dry-run)' } else { '' }))
 
-Step 'Claude Code customizations'
-Mirror-OwnedFiles (Join-Path $src '.claude\commands') (Join-Path $dst '.claude\commands') 'wspec-*.md'
-Mirror-OwnedFiles (Join-Path $src '.claude\agents')   (Join-Path $dst '.claude\agents')   'wspec-*.md'
+Step 'Claude Code settings (permissions reference)'
 $settingsExample = Join-Path $src '.claude\settings.example.json'
 if (Test-Path -LiteralPath $settingsExample) {
     New-FsDir (Join-Path $dst '.claude')
     Copy-FsItem -Source $settingsExample -Destination (Join-Path $dst '.claude\settings.example.json') -Label '.claude/settings.example.json'
 }
 
-Step 'Workflow wrapper commands'
-foreach ($wrapper in 'wspec-propose','wspec-research','wspec-principles','wspec-implement','wspec-finalize','wspec-propose.cmd','wspec-research.cmd','wspec-principles.cmd','wspec-implement.cmd','wspec-finalize.cmd') {
-    Copy-FsItem -Source (Join-Path $src $wrapper) -Destination (Join-Path $dst $wrapper) -Label $wrapper
-}
-
-if ($IsLinux -or $IsMacOS) {
-    foreach ($wrapper in 'wspec-propose','wspec-research','wspec-principles','wspec-implement','wspec-finalize') {
-        $wrapperPath = Join-Path $dst $wrapper
-        if (-not $script:DryRun -and (Test-Path -LiteralPath $wrapperPath)) {
-            & chmod +x -- $wrapperPath 2>$null
-        }
-    }
-    Ok 'set executable bit on workflow wrappers'
-}
-
 Step 'wspec/ framework files'
 Copy-Tree (Join-Path $src 'wspec\templates') (Join-Path $dst 'wspec\templates') -Overwrite -Mirror
 Copy-Tree (Join-Path $src 'wspec\scripts')   (Join-Path $dst 'wspec\scripts')   -Overwrite -Mirror
-Copy-Tree (Join-Path $src 'wspec\mcp')       (Join-Path $dst 'wspec\mcp')       -Overwrite -Mirror -ExcludeDirectories @('node_modules','dist')
 Copy-Tree (Join-Path $src 'wspec\schemas')   (Join-Path $dst 'wspec\schemas')   -Overwrite -Mirror
 Copy-FsItem -Source (Join-Path $src 'wspec\README.md') -Destination (Join-Path $dst 'wspec\README.md') -Label 'wspec/README.md'
 
 Step 'Remove obsolete files'
 # Only for orphans that live outside every mirrored directory above (e.g. a
-# file that used to sit directly under wspec/). Anything under
-# wspec/templates, wspec/scripts, wspec/mcp, or wspec/schemas is already
-# handled automatically by the mirror passes — do not duplicate entries here.
+# file that used to sit directly under wspec/, or wspec/mcp from a
+# pre-plugin install this script no longer mirrors). Anything under
+# wspec/templates, wspec/scripts, or wspec/schemas is already handled
+# automatically by the mirror passes — do not duplicate entries here.
 foreach ($obsolete in @('wspec\constitution.md')) {
     $obsoletePath = Join-Path $dst $obsolete
     if (Test-Path -LiteralPath $obsoletePath) {
         Remove-FsItem -Path $obsoletePath -Label $obsolete
     }
 }
-
-Step 'MCP setup (mandatory)'
-$mcpDir = Join-Path $dst 'wspec\mcp'
-if (-not (Test-CommandAvailable 'node')) {
-    throw 'Node.js is required for wSpec install. Install Node.js, then rerun install.ps1.'
-}
-if (-not (Test-CommandAvailable 'npm')) {
-    throw 'npm is required for wSpec install. Install npm (bundled with Node.js), then rerun install.ps1.'
-}
-
-if ($script:DryRun) {
-    # The directory-existence and build-artifact checks below assume the mirror pass above
-    # actually ran; under -DryRun nothing was written, so skip straight past them.
-    Skip 'npm install / npm run build (dry-run)'
-} else {
-    if (-not (Test-Path -LiteralPath $mcpDir)) {
-        throw "Missing required MCP directory: $mcpDir"
-    }
-
-    Invoke-RequiredCommand -FilePath 'npm' -ArgumentList @('install') -WorkingDirectory $mcpDir -FailureMessage 'Failed to install MCP dependencies (npm install). Fix the error above and rerun install.ps1.'
-    Invoke-RequiredCommand -FilePath 'npm' -ArgumentList @('run', 'build') -WorkingDirectory $mcpDir -FailureMessage 'Failed to build MCP CLI (npm run build). Fix the error above and rerun install.ps1.'
-
-    $mcpCli = Join-Path $mcpDir 'dist\cli.js'
-    if (-not (Test-Path -LiteralPath $mcpCli)) {
-        throw "MCP build completed without required artifact: $mcpCli"
-    }
-    Ok 'installed and built wspec/mcp'
+$legacyMcpDir = Join-Path $dst 'wspec\mcp'
+if ((Test-Path -LiteralPath $legacyMcpDir) -and -not $script:DryRun) {
+    Write-Host '    note: wspec/mcp/ from a pre-plugin install was left in place -- it is no longer used' -ForegroundColor DarkYellow
+    Write-Host '          (the MCP server now runs from the wspec plugin install) and can be deleted.' -ForegroundColor DarkYellow
 }
 
 Step 'Git hooks'
@@ -339,6 +284,16 @@ if (-not (Test-GitWorkTree $dst)) {
             }
             Ok 'set executable bit on hook shims'
         }
+
+        # The shims resolve wspec/mcp/dist/cli.js relative to their own location, which was
+        # correct under the pre-plugin mirror (wspec/mcp shipped alongside wspec/scripts in the
+        # consumer repo) but breaks now that mcp/ is plugin-owned and never mirrored. So bake the
+        # absolute path to this install's real cli.js in as a plain text file next to the shims,
+        # which they read (via Git for Windows' bundled sh) in preference to the old relative
+        # guess.
+        $hookCliPath = (Join-Path $src 'wspec\mcp\dist\cli.js') -replace '\\', '/'
+        Set-Content -LiteralPath (Join-Path $dst 'wspec/scripts/hooks/.wspec-mcp-cli-path') -Value $hookCliPath -NoNewline:$false
+        Ok 'resolved cli.js path for hook shims'
     }
 } else {
     if ($script:DryRun) {

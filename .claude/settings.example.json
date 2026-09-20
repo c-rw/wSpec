@@ -1,96 +1,26 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "Reference snapshot of wSpec-owned Claude Code settings. The installer merges these keys into .claude/settings.json automatically (init and upgrade), leaving your custom keys intact. See wspec/scripts/merge-settings.cjs for the merge logic.",
-  "mcpServers": {
-    "wspec": {
-      "command": "node",
-      "args": ["wspec/mcp/dist/cli.js", "serve"],
-      "type": "stdio"
-    }
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "node wspec/mcp/dist/cli.js state:banner"
-  },
-  "_hooks_comment": "MCP tool matchers use mcp__<serverName>__<toolName>. This server's tool names already embed a 'wspec.' prefix (see wspec/mcp/src/lib/tools.ts), so the wire name is literally 'wspec.markTask' etc. -> matcher 'mcp__wspec__wspec.markTask'.",
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node wspec/mcp/dist/cli.js state:banner"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node wspec/mcp/dist/cli.js state:banner"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node wspec/mcp/dist/cli.js hook:guard-edit"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "mcp__wspec__wspec.markTask|mcp__wspec__wspec.setStatus|mcp__wspec__wspec.syncSpec",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node wspec/mcp/dist/cli.js state:sync"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node wspec/mcp/dist/cli.js hook:nudge-validate"
-          },
-          {
-            "type": "command",
-            "command": "node wspec/mcp/dist/cli.js hook:usage-track"
-          }
-        ]
-      }
-    ]
-  },
-  "_permissions_comment": "Read-only wspec MCP tools and read-only git inspection are auto-allowed to cut friction. Mutating tools (setStatus, markTask, archive, postArchive, syncSpec apply:true, appendFindings, recordOverride) and mutating git (commit/push/merge) are deliberately left ungated here so Claude Code's normal per-call prompt still applies. wspec.forgeCaps is read-only. wspec.syncTicket is allowed despite writing to the forge because its content is fully derived from repo state (never free-form model text), it only ever touches a ticket wSpec was already linked to, and it's idempotent (a body_hash match is a no-op). wspec.bindTicket stays gated — it creates tickets and mutates metadata.yaml.",
+  "_comment": "Reference snapshot of the wSpec-owned Claude Code settings that CANNOT ship via the wspec plugin (see .claude-plugin/plugin.json) and are still merged into .claude/settings.json by install.ps1/install.sh + wspec/scripts/merge-settings.cjs. mcpServers and hooks come from the plugin itself (.mcp.json, hooks/hooks.json) once it's installed -- they are deliberately NOT in this file. There is no statusLine entry: the plugin's SessionStart/UserPromptSubmit hooks already surface the state banner, and merge-settings.cjs removes a statusLine an earlier version wrote.",
+  "subagentPromptCacheTtl": "1h",
+  "_permissions_comment": "Read-only wspec MCP tools and read-only git inspection are auto-allowed to cut friction. Mutating tools (setStatus, markTask, archive, postArchive, syncSpec apply:true, appendFindings, recordOverride) and mutating git (commit/push/merge) are deliberately left ungated here so Claude Code's normal per-call prompt still applies. wspec.forgeCaps is read-only. wspec.syncTicket is allowed despite writing to the forge because its content is fully derived from repo state (never free-form model text), it only ever touches a ticket wSpec was already linked to, and it's idempotent (a body_hash match is a no-op). wspec.bindTicket stays gated — it creates tickets and mutates metadata.yaml. wspec.setup stays gated too — it edits settings and git config. Keep this list in step with wspec/mcp/src/lib/settingsMerge.ts and wspec/scripts/merge-settings.cjs.",
   "permissions": {
     "allow": [
-      "Bash(node wspec/mcp/dist/cli.js:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
-      "mcp__wspec__wspec.status",
-      "mcp__wspec__wspec.loadChange",
-      "mcp__wspec__wspec.repoScan",
-      "mcp__wspec__wspec.loadState",
-      "mcp__wspec__wspec.verifyState",
-      "mcp__wspec__wspec.gateCheck",
-      "mcp__wspec__wspec.validateAnalysis",
-      "mcp__wspec__wspec.validateAll",
-      "mcp__wspec__wspec.doctor",
-      "mcp__wspec__wspec.listIssues",
-      "mcp__wspec__wspec.getIssue",
-      "mcp__wspec__wspec.usageReport",
-      "mcp__wspec__wspec.forgeCaps",
-      "mcp__wspec__wspec.syncTicket"
+      "mcp__plugin_wspec_wspec__wspec_status",
+      "mcp__plugin_wspec_wspec__wspec_loadChange",
+      "mcp__plugin_wspec_wspec__wspec_repoScan",
+      "mcp__plugin_wspec_wspec__wspec_loadState",
+      "mcp__plugin_wspec_wspec__wspec_verifyState",
+      "mcp__plugin_wspec_wspec__wspec_gateCheck",
+      "mcp__plugin_wspec_wspec__wspec_validateAnalysis",
+      "mcp__plugin_wspec_wspec__wspec_validateAll",
+      "mcp__plugin_wspec_wspec__wspec_doctor",
+      "mcp__plugin_wspec_wspec__wspec_listIssues",
+      "mcp__plugin_wspec_wspec__wspec_getIssue",
+      "mcp__plugin_wspec_wspec__wspec_usageReport",
+      "mcp__plugin_wspec_wspec__wspec_forgeCaps",
+      "mcp__plugin_wspec_wspec__wspec_syncTicket"
     ]
   }
 }

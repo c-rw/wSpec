@@ -1,13 +1,18 @@
 #!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
 import {
   runCommitMsgHook,
   runGuardEditHook,
   runNudgeValidateHook,
   runPreCommitHook,
+  runPreCompactSyncHook,
   runPrepareCommitMsgHook,
   runPrePushHook,
+  runSessionEndUsageFlushHook,
   runStateSyncHook,
-  runUsageTrackHook
+  runUsageTrackHook,
+  runValidateAnalysisWriteHook
 } from "./hooks.js";
 import { findRepoRoot } from "./lib/root.js";
 import { formatStateBanner } from "./lib/state.js";
@@ -30,11 +35,36 @@ function printUsage() {
       "  node dist/cli.js hook:pre-commit",
       "  node dist/cli.js hook:pre-push",
       "  node dist/cli.js hook:guard-edit",
+      "  node dist/cli.js hook:validate-analysis-write",
       "  node dist/cli.js hook:nudge-validate",
       "  node dist/cli.js hook:usage-track",
+      "  node dist/cli.js hook:session-end",
+      "  node dist/cli.js hook:pre-compact-sync",
       ""
     ].join("\n")
   );
+}
+
+// These ride along on every session where the plugin is enabled, which includes projects that never
+// ran /wspec:setup. There they do nothing, rather than dropping a wspec/ folder (state.json,
+// usage-cursor.json) into an unrelated repo. The git hooks (hook:pre-commit and friends) are only
+// wired by setup, so they aren't gated; state:banner writes nothing.
+const NEEDS_SETUP = new Set([
+  "hook:guard-edit",
+  "hook:validate-analysis-write",
+  "hook:nudge-validate",
+  "hook:usage-track",
+  "hook:session-end",
+  "hook:pre-compact-sync",
+  "state:sync"
+]);
+
+function isSetUp(): boolean {
+  try {
+    return fs.existsSync(path.join(findRepoRoot(), "wspec", "config.yaml"));
+  } catch {
+    return false;
+  }
 }
 
 function parseJsonArgs(raw: string | undefined): unknown {
@@ -52,6 +82,8 @@ function parseJsonArgs(raw: string | undefined): unknown {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+
+  if (command && NEEDS_SETUP.has(command) && !isSetUp()) return;
 
   switch (command) {
     case "serve": {
@@ -126,12 +158,24 @@ async function main() {
       process.exitCode = runGuardEditHook();
       return;
     }
+    case "hook:validate-analysis-write": {
+      process.exitCode = runValidateAnalysisWriteHook();
+      return;
+    }
     case "hook:nudge-validate": {
       process.exitCode = runNudgeValidateHook();
       return;
     }
     case "hook:usage-track": {
       process.exitCode = runUsageTrackHook();
+      return;
+    }
+    case "hook:session-end": {
+      process.exitCode = runSessionEndUsageFlushHook();
+      return;
+    }
+    case "hook:pre-compact-sync": {
+      process.exitCode = runPreCompactSyncHook();
       return;
     }
     case "state:sync": {

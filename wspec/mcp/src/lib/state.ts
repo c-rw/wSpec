@@ -383,7 +383,7 @@ export function loadState(repoRoot: string): WspecState {
 }
 
 /**
- * One-line status banner for the Claude Code statusLine / SessionStart hook. Reads the committed
+ * One-line status banner for the SessionStart / UserPromptSubmit hooks. Reads the committed
  * index only (fast, no rebuild) and returns "" when there is nothing to show.
  */
 export function formatStateBanner(repoRoot: string): string {

@@ -2,9 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { readYamlScalars } from "./lib/changes.js";
 import { appendOverrideLog, gateCheck, type GateName } from "./lib/gate.js";
+import { pluginCliPath } from "./lib/pluginPaths.js";
 import { findRepoRoot, normalizePathForGit } from "./lib/root.js";
 import { runCommand } from "./lib/shell.js";
 import { loadState, writeStateBestEffort } from "./lib/state.js";
+import { validateAnalysisFile } from "./lib/validate.js";
 import {
   addTotals,
   appendUsageSegment,
@@ -86,6 +88,16 @@ export function runPrepareCommitMsgHook(messageFile: string, commitSource?: stri
   return 0;
 }
 
+/** The command prefix for remediation steps a blocked user copy-pastes: the plugin's real bundle
+ * path, since a project has no wspec/mcp/dist/cli.js of its own. */
+function cliInvocation(): string {
+  try {
+    return `node "${pluginCliPath().replace(/\\/g, "/")}"`;
+  } catch {
+    return "node wspec/mcp/dist/cli.js";
+  }
+}
+
 function envOverrideReason(): string | null {
   const value = process.env.WSPEC_OVERRIDE_REASON;
   return value && value.trim() ? value.trim() : null;
@@ -141,16 +153,17 @@ function runGate(gate: GateName): number {
       }
     }
   }
+  const cli = cliInvocation();
   if (findingBlockers.length > 0) {
     process.stderr.write("\nResolve the finding(s) in analysis.md, or record a reasoned override per finding:\n");
     for (const blocker of findingBlockers) {
       process.stderr.write(
-        `  node wspec/mcp/dist/cli.js tool wspec.recordOverride '{"gate":"${gate}","findingId":"${blocker.id}","reason":"<why this is safe>"}'\n`
+        `  ${cli} tool wspec.recordOverride '{"gate":"${gate}","findingId":"${blocker.id}","reason":"<why this is safe>"}'\n`
       );
     }
   }
   if (checkBlockers.length > 0) {
-    process.stderr.write(`\nFix the failing check(s), then re-run: node wspec/mcp/dist/cli.js tool wspec.runChecks '{"id":"${result.change_id}"}'\n`);
+    process.stderr.write(`\nFix the failing check(s), then re-run: ${cli} tool wspec.runChecks '{"id":"${result.change_id}"}'\n`);
   }
   process.stderr.write('\nOr set WSPEC_OVERRIDE_REASON="..." for a one-shot audited bypass, or use --no-verify to skip hooks entirely.\n');
   return 1;
@@ -176,6 +189,69 @@ export function runPrePushHook(): number {
 interface ClaudeCodeToolPayload {
   tool_name?: string;
   tool_input?: { file_path?: string };
+}
+
+/**
+ * PreCompact hook. `additionalContext` is not supported on this event (only UserPromptSubmit,
+ * SessionStart, and PostModelSwitch honor it), so this cannot re-inject change-packet identity
+ * into the conversation directly — that already happens on the very next turn regardless, since
+ * the existing UserPromptSubmit hook re-runs `state:banner` on every user prompt, including the
+ * first one after a compaction. What PreCompact *can* usefully do is make sure the on-disk index
+ * that banner reads from is not stale the moment before Claude Code throws away the fine-grained
+ * conversation detail it was tracking — same defense-in-depth as the PostToolUse state:sync hook,
+ * just at a different trigger point. Always non-blocking (exit 2 would block compaction itself,
+ * which is never warranted here).
+ */
+export function runPreCompactSyncHook(): number {
+  try {
+    writeStateBestEffort(findRepoRoot());
+  } catch {
+    // Best-effort; never block compaction over an index refresh.
+  }
+  return 0;
+}
+
+interface AnalysisWritePayload {
+  tool_name?: string;
+  tool_input?: { file_path?: string };
+}
+
+/**
+ * PostToolUse hook matched on Edit|Write|MultiEdit. Fires after any write to a change's
+ * `analysis.md` and re-validates it against the schema immediately, rather than relying on the
+ * `/wspec-propose` Phase 4.55 prose ("call wspec.validateAnalysis... if invalid, feed issues back
+ * to the analyst") being followed. Note this cannot be a Stop hook scoped to the `wspec-analyst`
+ * subagent itself: that subagent never writes `analysis.md` (tools: Read, Grep, Glob only) — it
+ * returns markdown text, and the parent command is the one that persists it. So the hook has to
+ * live at the point of the actual write, in whichever session (main or subagent) performs it.
+ *
+ * Exit 2 here does not undo the write (PostToolUse can't); it surfaces the schema issues as
+ * feedback so Claude corrects the file in a follow-up edit, same as a failed test result would.
+ * Fails open on any parse uncertainty — a hook bug must never block unrelated file writes.
+ */
+export function runValidateAnalysisWriteHook(): number {
+  try {
+    const payload = readHookStdinJson<AnalysisWritePayload>();
+    const filePath = payload?.tool_input?.file_path;
+    if (!filePath) return 0;
+
+    const repoRoot = findRepoRoot();
+    const absoluteTarget = path.isAbsolute(filePath) ? filePath : path.join(repoRoot, filePath);
+    const relTarget = normalizePathForGit(path.relative(repoRoot, absoluteTarget));
+    if (!/^wspec\/changes\/[^/]+\/analysis\.md$/.test(relTarget)) return 0;
+
+    const result = validateAnalysisFile(absoluteTarget);
+    if (result.valid) return 0;
+
+    process.stderr.write(`[wspec] ${relTarget} failed schema validation (${result.issue_count} issue(s)):\n`);
+    for (const issue of result.issues) {
+      process.stderr.write(`  - ${issue.path}: ${issue.message}\n`);
+    }
+    process.stderr.write("[wspec] fix the YAML block (or re-dispatch wspec-analyst with these issues) before proceeding.\n");
+    return 2;
+  } catch {
+    return 0;
+  }
 }
 
 function readHookStdinJson<T>(): T | null {
@@ -404,4 +480,19 @@ export function runUsageTrackHook(): number {
     // Best-effort; never fail the Stop hook over a usage-tracking bug.
   }
   return 0;
+}
+
+/**
+ * SessionEnd hook: a final, best-effort call to the same cursor-based usage-flush logic as the
+ * Stop hook. Stop already fires at the end of every turn, so in the common case this is a no-op
+ * (the cursor is already caught up) — it exists for the session-ending paths that don't cleanly
+ * end with a Stop event (e.g. `/clear`, `/logout`, closing the terminal), so a change's final
+ * segment of usage isn't silently dropped. Safe to call from either event: it only reads
+ * `transcript_path`/`session_id` off stdin, which both events provide in the same shape.
+ *
+ * SessionEnd runs under a 1.5s shared budget unless the hook entry sets a longer `timeout` — see
+ * settings.example.json, which sets one, since this does file I/O.
+ */
+export function runSessionEndUsageFlushHook(): number {
+  return runUsageTrackHook();
 }

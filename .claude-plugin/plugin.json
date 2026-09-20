@@ -1,0 +1,14 @@
+{
+  "name": "wspec",
+  "displayName": "wSpec",
+  "description": "Spec-driven change workflow: propose, implement, and finalize changes with structured specs, adversarial quality gates, and per-phase validation.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Chris Worth"
+  },
+  "homepage": "https://github.com/c-rw/wSpec",
+  "repository": "https://github.com/c-rw/wSpec",
+  "license": "MIT",
+  "keywords": ["spec-driven", "workflow", "quality-gates", "change-management"],
+  "mcpServers": "./.mcp.json"
+}

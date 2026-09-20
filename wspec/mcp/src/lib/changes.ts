@@ -149,8 +149,14 @@ export function resolveChangeDir(repoRoot: string, id: string): { dir: string; a
 }
 
 export function getCurrentBranch(repoRoot: string): string | null {
-  const currentBranchResult = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
-  return currentBranchResult.code === 0 ? currentBranchResult.stdout.trim() : null;
+  // symbolic-ref still works on a branch with no commits yet — a brand-new repo, where the first
+  // commit is exactly when the gates need to run. `rev-parse --abbrev-ref HEAD` fails there, which
+  // made every gate conclude "no active change" and let the first commit through.
+  const symbolic = runCommand("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], repoRoot);
+  if (symbolic.code === 0 && symbolic.stdout.trim()) return symbolic.stdout.trim();
+  // A detached HEAD has no symbolic ref; rev-parse reports it as "HEAD".
+  const abbrev = runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
+  return abbrev.code === 0 ? abbrev.stdout.trim() : null;
 }
 
 export function assertChangeBranch(repoRoot: string, id: string, action: string) {

@@ -3,14 +3,16 @@ import path from "node:path";
 import { listChangeSummaries } from "./changes.js";
 import { readChecksConfig, readLatestChecks } from "./checks.js";
 import { getForgeCaps } from "./forgeCaps.js";
+import { pluginCliPath, pluginRoot } from "./pluginPaths.js";
 import { runCommand } from "./shell.js";
 import { maxMtimeMs, verifyState } from "./state.js";
 import { validateAnalysisFile } from "./validate.js";
 
 /**
- * Health probe for a wSpec install: tool availability, build freshness, git hook wiring, state
- * index sync, principles lock freshness, and analysis.md schema validity across active changes.
- * Read-only. Intended for `install.ps1`/`install.sh` post-install output and the Stop hook.
+ * Health probe for a wSpec setup: tool availability, the plugin's server bundle, the project-side
+ * files /wspec:setup installs, git hook wiring, state index sync, principles lock freshness, and
+ * analysis.md schema validity across active changes. Read-only. Surfaced by `wspec.doctor`,
+ * `/wspec:setup`, and the Stop hook.
  */
 
 export type DoctorStatus = "ok" | "warn" | "fail";
@@ -29,6 +31,62 @@ export interface DoctorReport {
 function worstOf(a: DoctorStatus, b: DoctorStatus): DoctorStatus {
   const rank: Record<DoctorStatus, number> = { ok: 0, warn: 1, fail: 2 };
   return rank[b] > rank[a] ? b : a;
+}
+
+function projectFilesCheck(repoRoot: string): DoctorCheck {
+  const missingHard: string[] = [];
+  const missingSoft: string[] = [];
+
+  if (!fs.existsSync(path.join(repoRoot, "wspec", "config.yaml"))) missingHard.push("wspec/config.yaml");
+
+  // Templates are read by the command prompts and by wspec workflows; schemas are reference
+  // material only (validation rules are built into the server), so a missing schema just warns.
+  let pluginWspec = "";
+  try {
+    pluginWspec = path.join(pluginRoot(), "wspec");
+  } catch {
+    // The bundle check above already reports this.
+  }
+  const missingIn = (dir: string): string[] => {
+    const source = path.join(pluginWspec, dir);
+    if (!pluginWspec || !fs.existsSync(source)) return [];
+    return fs.readdirSync(source).filter((name) => !fs.existsSync(path.join(repoRoot, "wspec", dir, name))).map((name) => `wspec/${dir}/${name}`);
+  };
+  missingHard.push(...missingIn("templates"));
+  missingSoft.push(...missingIn("schemas"));
+  if (!fs.existsSync(path.join(repoRoot, "wspec", "principles.md"))) missingSoft.push("wspec/principles.md");
+
+  if (missingHard.length > 0) {
+    return {
+      name: "wSpec project files",
+      status: "fail",
+      detail: `missing ${missingHard.join(", ")} — this project has not been set up; run /wspec:setup`
+    };
+  }
+  if (missingSoft.length > 0) {
+    return { name: "wSpec project files", status: "warn", detail: `missing ${missingSoft.join(", ")}; run /wspec:setup` };
+  }
+  return { name: "wSpec project files", status: "ok", detail: "config, templates, schemas, and principles present" };
+}
+
+function hookCliPathCheck(repoRoot: string, currentCli: string): DoctorCheck {
+  const name = "hook cli path";
+  const pathFile = path.join(repoRoot, "wspec", "scripts", "hooks", ".wspec-mcp-cli-path");
+  if (!fs.existsSync(pathFile)) {
+    // A wSpec checkout has no path file: the shims fall back to the bundle next to them.
+    if (fs.existsSync(path.join(repoRoot, "wspec", "mcp", "dist", "cli.js"))) {
+      return { name, status: "ok", detail: "shims use this checkout's own bundle" };
+    }
+    return { name, status: "warn", detail: "wspec/scripts/hooks/.wspec-mcp-cli-path is missing, so the git hooks can't find the plugin; run /wspec:setup" };
+  }
+  const recorded = fs.readFileSync(pathFile, "utf8").trim();
+  if (!fs.existsSync(recorded)) {
+    return { name, status: "warn", detail: `git hooks point at ${recorded}, which no longer exists (plugin moved or updated?); run /wspec:setup to refresh` };
+  }
+  if (currentCli && fs.existsSync(currentCli) && fs.realpathSync(recorded) !== fs.realpathSync(currentCli)) {
+    return { name, status: "warn", detail: `git hooks point at ${recorded}, not the running plugin (${currentCli}); run /wspec:setup to refresh` };
+  }
+  return { name, status: "ok", detail: "git hooks point at the running plugin" };
 }
 
 export function runDoctor(repoRoot: string): DoctorReport {
@@ -55,15 +113,22 @@ export function runDoctor(repoRoot: string): DoctorReport {
     detail: glab.code === 0 ? glab.stdout.trim().split(/\r?\n/)[0] : "glab CLI not found; only needed for post_archive_action: pr on GitLab remotes"
   });
 
-  const distEntry = path.join(repoRoot, "wspec", "mcp", "dist", "cli.js");
-  const distExists = fs.existsSync(distEntry);
-  checks.push({
-    name: "mcp dist build",
-    status: distExists ? "ok" : "fail",
-    detail: distExists ? "wspec/mcp/dist/cli.js present" : "wspec/mcp/dist/cli.js missing; run npm run build in wspec/mcp"
-  });
+  // The server runs from the plugin's own bundle, never from the project — so this checks that
+  // bundle, not <project>/wspec/mcp.
+  let cliPath = "";
+  try {
+    cliPath = pluginCliPath();
+    checks.push({
+      name: "mcp server bundle",
+      status: fs.existsSync(cliPath) ? "ok" : "fail",
+      detail: fs.existsSync(cliPath) ? `running from ${cliPath}` : `${cliPath} is missing; reinstall the wspec plugin`
+    });
+  } catch (error) {
+    checks.push({ name: "mcp server bundle", status: "fail", detail: error instanceof Error ? error.message : String(error) });
+  }
 
-  if (distExists) {
+  // Only meaningful in a wSpec checkout, where src sits next to the bundle it builds.
+  if (fs.existsSync(path.join(repoRoot, "wspec", "mcp", "src"))) {
     const srcMax = maxMtimeMs(path.join(repoRoot, "wspec", "mcp", "src"));
     const distMax = maxMtimeMs(path.join(repoRoot, "wspec", "mcp", "dist"));
     const stale = srcMax > distMax;
@@ -74,6 +139,8 @@ export function runDoctor(repoRoot: string): DoctorReport {
     });
   }
 
+  checks.push(projectFilesCheck(repoRoot));
+
   const hooksPathOut = runCommand("git", ["config", "--get", "core.hooksPath"], repoRoot);
   const hooksPath = hooksPathOut.code === 0 ? hooksPathOut.stdout.trim() : "";
   checks.push({
@@ -81,8 +148,14 @@ export function runDoctor(repoRoot: string): DoctorReport {
     status: hooksPath === "wspec/scripts/hooks" ? "ok" : "warn",
     detail: hooksPath
       ? `core.hooksPath=${hooksPath} (expected wspec/scripts/hooks)`
-      : "core.hooksPath not set; run install.ps1/install.sh, or hooks are intentionally disabled"
+      : "core.hooksPath not set; run /wspec:setup, or hooks are intentionally disabled"
   });
+
+  // The git shims can't use ${CLAUDE_PLUGIN_ROOT}, so /wspec:setup records the plugin's cli.js
+  // path in a file next to them. It goes stale when the plugin moves or updates.
+  if (hooksPath === "wspec/scripts/hooks") {
+    checks.push(hookCliPathCheck(repoRoot, cliPath));
+  }
 
   const caps = getForgeCaps(repoRoot);
   checks.push({

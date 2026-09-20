@@ -1,3 +1,11 @@
+---
+description: Validate completion, sync delta specs, archive, commit, and optionally open a PR/MR
+argument-hint: [change-id]
+model: inherit
+effort: medium
+allowed-tools: Read, Write, Bash, AskUserQuestion, mcp__plugin_wspec_wspec
+---
+
 # wSpec Finalize
 
 ## User Input
@@ -5,6 +13,9 @@
 ```text
 $ARGUMENTS
 ```
+
+> **Preflight**: if `wspec/config.yaml` does not exist in this project, wSpec has not been set up
+> here. Stop and tell the user to run `/wspec:setup` first — do not try to create it yourself.
 
 ---
 

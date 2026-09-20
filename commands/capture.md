@@ -1,3 +1,11 @@
+---
+description: Turn a free-form brain-dump into tracked GitHub/GitLab issues (no code or spec artifacts)
+argument-hint: <brain-dump>
+model: inherit
+effort: medium
+allowed-tools: Read, AskUserQuestion, mcp__plugin_wspec_wspec
+---
+
 # wSpec Capture
 
 ## User Input
@@ -5,6 +13,9 @@
 ```text
 $ARGUMENTS
 ```
+
+> **Preflight**: if `wspec/config.yaml` does not exist in this project, wSpec has not been set up
+> here. Stop and tell the user to run `/wspec:setup` first — do not try to create it yourself.
 
 If `$ARGUMENTS` is non-empty, ground everything that follows in it before doing anything else.
 

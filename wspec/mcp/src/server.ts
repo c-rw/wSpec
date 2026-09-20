@@ -8,6 +8,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { findToolByName, toolDefinitions } from "./lib/tools.js";
 
+/** Some clients pad a call to a tool with no required arguments with a dummy key such as
+ * `_placeholder`. No wSpec tool has an underscore-prefixed parameter, so drop them here; a real
+ * typo like `hook: false` is still rejected by the tool's own strict schema. */
+function withoutPlaceholderKeys(args: unknown): unknown {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return args;
+  return Object.fromEntries(Object.entries(args).filter(([key]) => !key.startsWith("_")));
+}
+
 export async function startServer() {
   const server = new Server(
     {
@@ -41,7 +49,7 @@ export async function startServer() {
     }
 
     try {
-      const result = tool.run(request.params.arguments ?? {});
+      const result = tool.run(withoutPlaceholderKeys(request.params.arguments ?? {}));
       return {
         content: [{ type: "text", text: JSON.stringify(result) }]
       };

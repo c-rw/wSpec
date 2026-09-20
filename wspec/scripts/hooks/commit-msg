@@ -1,10 +1,16 @@
 #!/usr/bin/env sh
 set -eu
 
-WSPEC_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+HOOK_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 if ! command -v node >/dev/null 2>&1; then
 	exit 0
 fi
 
-exec node "$WSPEC_DIR/mcp/dist/cli.js" hook:commit-msg "$@"
+if [ -f "$HOOK_DIR/.wspec-mcp-cli-path" ]; then
+	CLI_PATH="$(cat "$HOOK_DIR/.wspec-mcp-cli-path")"
+else
+	CLI_PATH="$(CDPATH= cd -- "$HOOK_DIR/../.." && pwd)/mcp/dist/cli.js"
+fi
+
+exec node "$CLI_PATH" hook:commit-msg "$@"
